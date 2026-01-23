@@ -1,4 +1,5 @@
-// SPDX-FileCopyrightText: Copyright 2025 Carabiner Systems, Inc
+// SPDX-FileCopyrightText: Copyright 2026 Carabiner Systems, Inc
+// SPDX-License-Identifier: Apache-2.0
 
 package main
 
@@ -6,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/carabiner-dev/deadrop/pkg/cmd"
 	"github.com/spf13/cobra"
 )
 
@@ -23,12 +25,12 @@ automatically manages token caching using the XDG Base Directory specification.`
 	}
 
 	// Add commands
-	rootCmd.AddCommand(newLoginCmd())
-	rootCmd.AddCommand(newTokenCmd())
-	rootCmd.AddCommand(newLogoutCmd())
-	rootCmd.AddCommand(newVerifyCmd())
-	rootCmd.AddCommand(newExchangeCmd())
-	rootCmd.AddCommand(newVersionCmd())
+	cmd.AddLogin(rootCmd)
+	cmd.AddToken(rootCmd)
+	cmd.AddLogout(rootCmd)
+	cmd.AddVerify(rootCmd)
+	cmd.AddExchange(rootCmd)
+	addVersion(rootCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -36,12 +38,12 @@ automatically manages token caching using the XDG Base Directory specification.`
 	}
 }
 
-func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
+func addVersion(parent *cobra.Command) {
+	parent.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("deadrop version %s\n", version)
 		},
-	}
+	})
 }

@@ -1,27 +1,67 @@
-// SPDX-FileCopyrightText: Copyright 2025 Carabiner Systems, Inc
+// SPDX-FileCopyrightText: Copyright 2026 Carabiner Systems, Inc
+// SPDX-License-Identifier: Apache-2.0
 
-package main
+package cmd
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/carabiner-dev/command"
 
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 	"github.com/spf13/cobra"
 )
 
-const defaultServer = "https://auth.carabiner.dev"
+var _ command.OptionsSet = (*ExchangeOptions)(nil)
 
-func newExchangeCmd() *cobra.Command {
-	var (
-		server   string
-		audience []string
-		scope    []string
-		resource []string
-	)
+// ExchangeOptions are the options to perform a token exchange
+type ExchangeOptions struct {
+	TokenReadOptions
+	ServerOptions
+	Audience []string
+	Scope    []string
+	Resource []string
+}
+
+var defaultExchangeOptions = ExchangeOptions{
+	TokenReadOptions: defaultTokenReadOptions,
+	ServerOptions:    defaultServerOptions,
+}
+
+func (eo *ExchangeOptions) Validate() error {
+	errs := []error{
+		eo.TokenReadOptions.Validate(),
+		eo.ServerOptions.Validate(),
+	}
+	if eo.Server == "" {
+		errs = append(errs, errors.New("exchange server is not defined"))
+	}
+
+	if len(eo.Audience) == 0 {
+		errs = append(errs, errors.New("at least one --audience is required"))
+	}
+
+	return errors.Join(errs...)
+}
+
+func (eo *ExchangeOptions) AddFlags(cmd *cobra.Command) {
+	eo.TokenReadOptions.AddFlags(cmd)
+	eo.ServerOptions.AddFlags(cmd)
+	cmd.PersistentFlags().StringSliceVar(&eo.Audience, "audience", nil, "Target audience(s)")
+	cmd.PersistentFlags().StringSliceVar(&eo.Scope, "scope", nil, "Requested scope(s)")
+	cmd.PersistentFlags().StringSliceVar(&eo.Resource, "resource", nil, "Resource URI(s)")
+}
+
+func (eo *ExchangeOptions) Config() *command.OptionsSetConfig {
+	return nil
+}
+
+func AddExchange(parent *cobra.Command) {
+	opts := defaultExchangeOptions
 
 	cmd := &cobra.Command{
 		Use:   "exchange <token-file>",
@@ -43,102 +83,65 @@ Examples:
     --audience https://api.staging.example.com \
     --resource https://api.example.com/users
 
-  # Use a custom server
+  # Use a custom exchange server
   deadrop exchange token.jwt --server https://auth.mycompany.com --audience https://api.example.com`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if opts.TokenPath == "" && args[0] != "" {
+				opts.TokenPath = args[0]
+			}
+			return opts.Validate()
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Read token from file or stdin
-			token, err := readToken(args[0])
+			token, err := opts.ReadToken()
 			if err != nil {
 				return fmt.Errorf("reading token: %w", err)
 			}
-			return runExchange(cmd, server, token, audience, scope, resource)
+
+			// Basic JWT format validation
+			parts := strings.Split(token, ".")
+			if len(parts) != 3 {
+				return fmt.Errorf("invalid JWT format: expected 3 parts separated by '.', got %d parts (token length: %d chars)", len(parts), len(token))
+			}
+
+			// Create exchange client
+			client := exchange.NewClient(opts.Server)
+
+			// Build request
+			req := &exchange.ExchangeRequest{
+				SubjectToken: token,
+				Audience:     opts.Audience,
+				Scope:        opts.Scope,
+				Resource:     opts.Resource,
+			}
+
+			// Perform exchange
+			fmt.Fprintf(os.Stderr, "Exchanging token with %s...\n", opts.Server)
+			resp, err := client.ExchangeToken(cmd.Context(), req)
+			if err != nil {
+				return fmt.Errorf("token exchange failed: %w", err)
+			}
+
+			// Print metadata to stderr
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintf(os.Stderr, "Token Type:  %s\n", resp.TokenType)
+			fmt.Fprintf(os.Stderr, "Issued Type: %s\n", resp.IssuedTokenType)
+			fmt.Fprintf(os.Stderr, "Expires In:  %s\n", time.Duration(resp.ExpiresIn)*time.Second)
+			fmt.Fprintln(os.Stderr)
+
+			// Decode and show JWT claims
+			if err := decodeJWT(resp.AccessToken); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to decode JWT: %v\n", err)
+			}
+			fmt.Fprintln(os.Stderr)
+
+			// Print token to stdout
+			fmt.Println(resp.AccessToken)
+
+			return nil
 		},
 	}
-
-	cmd.Flags().StringVar(&server, "server", defaultServer, "Deadropx server URL")
-	cmd.Flags().StringSliceVar(&audience, "audience", nil, "Target audience(s) for the token (can be specified multiple times)")
-	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Requested scope(s) (can be specified multiple times)")
-	cmd.Flags().StringSliceVar(&resource, "resource", nil, "Resource URI(s) (can be specified multiple times)")
-
-	return cmd
-}
-
-// readToken reads a token from a file path or stdin (if path is "-")
-func readToken(path string) (string, error) {
-	var data []byte
-	var err error
-
-	if path == "-" {
-		data, err = io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("reading from stdin: %w", err)
-		}
-	} else {
-		data, err = os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("reading file %s: %w", path, err)
-		}
-	}
-
-	// Clean up whitespace/newlines
-	return strings.TrimSpace(string(data)), nil
-}
-
-func runExchange(cmd *cobra.Command, server, token string, audience, scope, resource []string) error {
-	ctx := cmd.Context()
-
-	// Clean up the token (remove whitespace/newlines that might have been introduced)
-	token = strings.TrimSpace(token)
-
-	// Validate inputs
-	if token == "" {
-		return fmt.Errorf("token is required")
-	}
-
-	// Basic JWT format validation
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid JWT format: expected 3 parts separated by '.', got %d parts (token length: %d chars)", len(parts), len(token))
-	}
-
-	if len(audience) == 0 {
-		return fmt.Errorf("at least one --audience is required")
-	}
-
-	// Create exchange client
-	client := exchange.NewClient(server)
-
-	// Build request
-	req := &exchange.ExchangeRequest{
-		SubjectToken: token,
-		Audience:     audience,
-		Scope:        scope,
-		Resource:     resource,
-	}
-
-	// Perform exchange
-	fmt.Fprintf(os.Stderr, "Exchanging token with %s...\n", server)
-	resp, err := client.ExchangeToken(ctx, req)
-	if err != nil {
-		return fmt.Errorf("token exchange failed: %w", err)
-	}
-
-	// Print metadata to stderr
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "Token Type:  %s\n", resp.TokenType)
-	fmt.Fprintf(os.Stderr, "Issued Type: %s\n", resp.IssuedTokenType)
-	fmt.Fprintf(os.Stderr, "Expires In:  %s\n", time.Duration(resp.ExpiresIn)*time.Second)
-	fmt.Fprintln(os.Stderr)
-
-	// Decode and show JWT claims
-	if err := decodeJWT(resp.AccessToken); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to decode JWT: %v\n", err)
-	}
-	fmt.Fprintln(os.Stderr)
-
-	// Print token to stdout
-	fmt.Println(resp.AccessToken)
-
-	return nil
+	opts.AddFlags(cmd)
+	parent.AddCommand(cmd)
 }
