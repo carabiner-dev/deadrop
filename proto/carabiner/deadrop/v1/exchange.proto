@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: Copyright 2025 Carabiner Systems, Inc
+
+syntax = "proto3";
+
+package carabiner.deadrop.v1;
+
+option go_package = "github.com/carabiner-dev/deadrop/api/v1;v1";
+
+// ExchangeRequest represents an RFC 8693 token exchange request
+message ExchangeRequest {
+  // The OAuth token to exchange
+  string subject_token = 1;
+
+  // Type of subject token (e.g., "urn:ietf:params:oauth:token-type:jwt")
+  string subject_token_type = 2;
+
+  // Requested token type (e.g., "urn:ietf:params:oauth:token-type:jwt")
+  string requested_token_type = 3;
+
+  // Target audience(s) - multiple values per RFC 8693
+  repeated string audience = 4;
+
+  // Optional scopes
+  repeated string scope = 5;
+
+  // Resource URIs - multiple values per RFC 8693
+  repeated string resource = 6;
+}
+
+// ExchangeResponse represents the response from token exchange
+message ExchangeResponse {
+  // The access token issued by the authorization server
+  string access_token = 1;
+
+  // The type of token issued (e.g., "urn:ietf:params:oauth:token-type:jwt")
+  string issued_token_type = 2;
+
+  // The type of the token (e.g., "Bearer")
+  string token_type = 3;
+
+  // The lifetime in seconds of the access token
+  int64 expires_in = 4;
+}
+
+// ErrorResponse represents an OAuth 2.0 error response
+message ErrorResponse {
+  // Error code as defined in RFC 6749
+  string error = 1;
+
+  // Human-readable description of the error
+  string error_description = 2;
+}
