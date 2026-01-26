@@ -4,6 +4,8 @@
 package cmd
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -30,8 +32,13 @@ type JWK struct {
 	Kid string `json:"kid"` // Key ID
 	Use string `json:"use"` // Public key use
 	Alg string `json:"alg"` // Algorithm
-	N   string `json:"n"`   // RSA modulus
-	E   string `json:"e"`   // RSA exponent
+	// RSA fields
+	N string `json:"n"` // RSA modulus
+	E string `json:"e"` // RSA exponent
+	// EC fields
+	Crv string `json:"crv"` // EC curve
+	X   string `json:"x"`   // EC X coordinate
+	Y   string `json:"y"`   // EC Y coordinate
 }
 
 var _ command.OptionsSet = (*VerifyOptions)(nil)
@@ -53,6 +60,7 @@ func (vo *VerifyOptions) Validate() error {
 }
 
 func (vo *VerifyOptions) AddFlags(cmd *cobra.Command) {
+	vo.TokenReadOptions.AddFlags(cmd)
 	cmd.PersistentFlags().StringVar(&vo.ExpectedIssuer, "issuer", "", "expected issuer URL (optional)")
 	cmd.PersistentFlags().BoolVar(&vo.SkipExpiry, "skip-expiry", false, "skip expiration check")
 	cmd.PersistentFlags().BoolVar(&vo.SkipSignature, "skip-signature", false, "skip signature verification")
@@ -123,7 +131,7 @@ The token can be provided via --token flag or as the first argument.`,
 			var signatureError error
 
 			if !opts.SkipSignature && issuer != "" {
-				signatureValid, signatureError = verifySignature(opts.TokenPath, issuer)
+				signatureValid, signatureError = verifySignature(tokendata, issuer)
 			}
 
 			// Print header
@@ -313,17 +321,37 @@ func verifySignature(tokenString, issuer string) (bool, error) {
 		return false, fmt.Errorf("key with kid=%q not found in JWKS", kid)
 	}
 
-	// Convert JWK to RSA public key
-	publicKey, err := jwkToRSAPublicKey(matchingKey)
-	if err != nil {
-		return false, fmt.Errorf("failed to convert JWK to RSA public key: %w", err)
+	// Convert JWK to public key based on key type
+	var publicKey interface{}
+	switch matchingKey.Kty {
+	case "RSA":
+		rsaKey, err := jwkToRSAPublicKey(matchingKey)
+		if err != nil {
+			return false, fmt.Errorf("failed to convert JWK to RSA public key: %w", err)
+		}
+		publicKey = rsaKey
+	case "EC":
+		ecKey, err := jwkToECDSAPublicKey(matchingKey)
+		if err != nil {
+			return false, fmt.Errorf("failed to convert JWK to ECDSA public key: %w", err)
+		}
+		publicKey = ecKey
+	default:
+		return false, fmt.Errorf("unsupported key type: %s (only RSA and EC are supported)", matchingKey.Kty)
 	}
 
 	// Verify the token signature
 	verifiedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Verify the signing method
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		// Verify the signing method matches the key type
+		switch matchingKey.Kty {
+		case "RSA":
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v (expected RSA)", token.Header["alg"])
+			}
+		case "EC":
+			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v (expected ECDSA)", token.Header["alg"])
+			}
 		}
 		return publicKey, nil
 	})
@@ -366,6 +394,51 @@ func jwkToRSAPublicKey(jwk *JWK) (*rsa.PublicKey, error) {
 	publicKey := &rsa.PublicKey{
 		N: n,
 		E: e,
+	}
+
+	return publicKey, nil
+}
+
+// jwkToECDSAPublicKey converts a JWK to an ECDSA public key
+func jwkToECDSAPublicKey(jwk *JWK) (*ecdsa.PublicKey, error) {
+	if jwk.Kty != "EC" {
+		return nil, fmt.Errorf("unsupported key type: %s (only EC is supported)", jwk.Kty)
+	}
+
+	// Determine the curve
+	var curve elliptic.Curve
+	switch jwk.Crv {
+	case "P-256":
+		curve = elliptic.P256()
+	case "P-384":
+		curve = elliptic.P384()
+	case "P-521":
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported curve: %s", jwk.Crv)
+	}
+
+	// Decode X coordinate
+	xBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode X coordinate: %w", err)
+	}
+
+	// Decode Y coordinate
+	yBytes, err := base64.RawURLEncoding.DecodeString(jwk.Y)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode Y coordinate: %w", err)
+	}
+
+	// Convert bytes to big integers
+	x := new(big.Int).SetBytes(xBytes)
+	y := new(big.Int).SetBytes(yBytes)
+
+	// Create the ECDSA public key
+	publicKey := &ecdsa.PublicKey{
+		Curve: curve,
+		X:     x,
+		Y:     y,
 	}
 
 	return publicKey, nil

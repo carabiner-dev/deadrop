@@ -87,7 +87,7 @@ Examples:
   deadrop exchange token.jwt --server https://auth.mycompany.com --audience https://api.example.com`,
 		Args: cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if opts.TokenPath == "" && args[0] != "" {
+			if opts.TokenPath == "" && len(args) > 0 && args[0] != "" {
 				opts.TokenPath = args[0]
 			}
 			return opts.Validate()
