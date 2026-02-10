@@ -4,7 +4,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,44 +17,103 @@ var _ command.OptionsSet = (*TokenReadOptions)(nil)
 
 var defaultTokenReadOptions = TokenReadOptions{}
 
-// TokenOptions are the options to perform a token exchange
+// TokenReadOptions are the options to read a token from various sources
 type TokenReadOptions struct {
 	TokenPath string
 }
 
 func (to *TokenReadOptions) AddFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVar(&to.TokenPath, "token", "", "Path to the token to exchange (or - for STDIN)")
+	cmd.PersistentFlags().StringVar(&to.TokenPath, "token", "", "Path to the token file (defaults to carabiner identity)")
 }
 
 func (to *TokenReadOptions) Validate() error {
-	var errs = []error{}
-	if to.TokenPath == "" {
-		errs = append(errs, errors.New("path to token not specified"))
-	}
-	return errors.Join(errs...)
-}
-
-func (eo *TokenReadOptions) Config() *command.OptionsSetConfig {
+	// No validation needed - we have a default fallback
 	return nil
 }
 
-// readToken reads a token from a file path or stdin (if path is "-")
-func (eo *TokenReadOptions) ReadToken() (string, error) {
-	var data []byte
-	var err error
+func (to *TokenReadOptions) Config() *command.OptionsSetConfig {
+	return nil
+}
 
-	if eo.TokenPath == "-" {
-		data, err = io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("reading from stdin: %w", err)
-		}
-	} else {
-		data, err = os.ReadFile(eo.TokenPath)
-		if err != nil {
-			return "", fmt.Errorf("reading file %s: %w", eo.TokenPath, err)
-		}
+// ReadToken reads a token with the following precedence:
+// 1. stdin (if "-" is specified or data is piped)
+// 2. --token flag (explicit file path)
+// 3. carabiner identity file (~/.config/carabiner/identity.json)
+func (to *TokenReadOptions) ReadToken() (string, error) {
+	// Check if reading from stdin
+	if to.TokenPath == "-" {
+		return readFromStdin()
 	}
 
-	// Clean up whitespace/newlines
-	return strings.TrimSpace(string(data)), nil
+	// Check if --token was explicitly provided
+	if to.TokenPath != "" {
+		return readFromFile(to.TokenPath)
+	}
+
+	// Check if stdin has data (piped input without explicit "-")
+	if hasStdinData() {
+		return readFromStdin()
+	}
+
+	// Default: read from carabiner identity file
+	return readFromCarabinerIdentity()
+}
+
+// hasStdinData checks if there's data available on stdin (piped input)
+func hasStdinData() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	// Check if stdin is a pipe or has data
+	return (stat.Mode() & os.ModeCharDevice) == 0
+}
+
+// readFromStdin reads token data from stdin
+func readFromStdin() (string, error) {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("reading from stdin: %w", err)
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("no token data received from stdin")
+	}
+	return token, nil
+}
+
+// readFromFile reads token data from a file
+func readFromFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading file %s: %w", path, err)
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("token file %s is empty", path)
+	}
+	return token, nil
+}
+
+// readFromCarabinerIdentity reads the token from the default carabiner identity file
+func readFromCarabinerIdentity() (string, error) {
+	identityPath, err := getCarabinerIdentityPath()
+	if err != nil {
+		return "", fmt.Errorf("getting identity path: %w", err)
+	}
+
+	data, err := os.ReadFile(identityPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no carabiner identity found at %s (run 'deadrop login' first)", identityPath)
+		}
+		return "", fmt.Errorf("reading identity file: %w", err)
+	}
+
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("carabiner identity file is empty")
+	}
+
+	return token, nil
 }

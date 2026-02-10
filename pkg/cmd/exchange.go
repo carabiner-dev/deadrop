@@ -64,32 +64,37 @@ func AddExchange(parent *cobra.Command) {
 	opts := defaultExchangeOptions
 
 	cmd := &cobra.Command{
-		Use:   "exchange <token-file>",
-		Short: "Exchange a JWT token via the deadropx server",
-		Long: `Exchange a JWT token for a new token from the deadropx server.
+		Use:   "exchange",
+		Short: "Exchange your Carabiner identity for a service token",
+		Long: `Exchange your Carabiner identity token for a new token with a specific audience.
 
-The token is read from a file path. Use "-" to read from stdin.
+By default, the command uses your Carabiner identity from ~/.config/carabiner/identity.json
+(created by 'deadrop login'). You can also pipe a token or specify one with --token.
+
+Token source precedence:
+  1. Piped input (stdin)
+  2. --token flag (explicit file path)
+  3. Carabiner identity file (default)
 
 Examples:
-  # Exchange a token from a file
-  deadrop exchange token.jwt --audience https://api.example.com
+  # Exchange using your Carabiner identity (default)
+  deadrop exchange --audience https://api.example.com
 
-  # Read token from stdin
-  echo "$TOKEN" | deadrop exchange - --audience https://api.example.com
-
-  # Exchange with multiple audiences and resources
-  deadrop exchange token.jwt \
+  # Exchange with multiple audiences
+  deadrop exchange \
     --audience https://api.example.com \
-    --audience https://api.staging.example.com \
-    --resource https://api.example.com/users
+    --audience https://api.staging.example.com
+
+  # Pipe a token
+  echo "$TOKEN" | deadrop exchange --audience https://api.example.com
+
+  # Use a specific token file
+  deadrop exchange --token /path/to/token.jwt --audience https://api.example.com
 
   # Use a custom exchange server
-  deadrop exchange token.jwt --server https://auth.mycompany.com --audience https://api.example.com`,
-		Args: cobra.MaximumNArgs(1),
+  deadrop exchange --server https://auth.mycompany.com --audience https://api.example.com`,
+		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if opts.TokenPath == "" && len(args) > 0 && args[0] != "" {
-				opts.TokenPath = args[0]
-			}
 			return opts.Validate()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
