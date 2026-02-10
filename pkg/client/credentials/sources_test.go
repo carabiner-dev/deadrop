@@ -180,3 +180,103 @@ func TestEnvTokenSource(t *testing.T) {
 		}
 	})
 }
+
+func TestChainedTokenSource(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("first source succeeds", func(t *testing.T) {
+		source := NewChainedTokenSource(
+			NewStaticTokenSource("first-token"),
+			NewStaticTokenSource("second-token"),
+		)
+		token, err := source.Token(ctx)
+		if err != nil {
+			t.Errorf("Token() error: %v", err)
+		}
+		if token != "first-token" {
+			t.Errorf("Token() = %q, want %q", token, "first-token")
+		}
+	})
+
+	t.Run("first fails second succeeds", func(t *testing.T) {
+		source := NewChainedTokenSource(
+			NewStaticTokenSource(""), // Will fail
+			NewStaticTokenSource("second-token"),
+		)
+		token, err := source.Token(ctx)
+		if err != nil {
+			t.Errorf("Token() error: %v", err)
+		}
+		if token != "second-token" {
+			t.Errorf("Token() = %q, want %q", token, "second-token")
+		}
+	})
+
+	t.Run("all sources fail", func(t *testing.T) {
+		source := NewChainedTokenSource(
+			NewStaticTokenSource(""),
+			NewEnvTokenSource("DEFINITELY_NOT_SET_12345"),
+		)
+		_, err := source.Token(ctx)
+		if err == nil {
+			t.Error("Token() expected error when all sources fail, got nil")
+		}
+	})
+
+	t.Run("no sources", func(t *testing.T) {
+		source := NewChainedTokenSource()
+		_, err := source.Token(ctx)
+		if err == nil {
+			t.Error("Token() expected error for no sources, got nil")
+		}
+	})
+}
+
+func TestDefaultEnvTokenSource(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns source for correct env var", func(t *testing.T) {
+		t.Setenv(DefaultCredentialsEnvVar, "test-token")
+
+		source := DefaultEnvTokenSource()
+		token, err := source.Token(ctx)
+		if err != nil {
+			t.Errorf("Token() error: %v", err)
+		}
+		if token != "test-token" {
+			t.Errorf("Token() = %q, want %q", token, "test-token")
+		}
+	})
+}
+
+func TestDefaultFileTokenSource(t *testing.T) {
+	t.Run("returns source with correct path", func(t *testing.T) {
+		source, err := DefaultFileTokenSource()
+		if err != nil {
+			t.Fatalf("DefaultFileTokenSource() error: %v", err)
+		}
+		if source == nil {
+			t.Error("DefaultFileTokenSource() returned nil")
+		}
+		// The path should contain the default config dir and file
+		if source.path == "" {
+			t.Error("DefaultFileTokenSource() path is empty")
+		}
+	})
+}
+
+func TestDefaultTokenSource(t *testing.T) {
+	t.Run("returns chained source", func(t *testing.T) {
+		source, err := DefaultTokenSource()
+		if err != nil {
+			t.Fatalf("DefaultTokenSource() error: %v", err)
+		}
+		if source == nil {
+			t.Error("DefaultTokenSource() returned nil")
+		}
+		// Verify it's a chained source
+		if _, ok := source.(*ChainedTokenSource); !ok {
+			t.Errorf("DefaultTokenSource() returned %T, want *ChainedTokenSource", source)
+		}
+	})
+}

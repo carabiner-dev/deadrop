@@ -43,15 +43,16 @@ type managedToken struct {
 // It uses a central identity token source to exchange for short lived
 // audience-specific tokens.
 type Manager struct {
-	mu            sync.RWMutex
-	centralSource TokenSource
-	server        string
-	client        *exchange.Client
-	tokens        map[string]*managedToken
+	mu             sync.RWMutex
+	centralSource  TokenSource   // The resolved token source (may be chained)
+	centralSources []TokenSource // Sources provided via options (before resolution)
+	server         string
+	client         *exchange.Client
+	tokens         map[string]*managedToken
 
 	// Cached central token state
-	centralToken          string
-	centralTokenExpiresAt time.Time
+	centralToken           string
+	centralTokenExpiresAt  time.Time
 	centralTokenRefreshing bool
 
 	// refreshBuffer is the fraction of lifetime remaining to trigger refresh
@@ -67,44 +68,67 @@ type Manager struct {
 }
 
 // NewManager creates a new credential manager.
-// The source provides the central identity token used for all exchanges.
+//
+// Use WithTokenSource to configure the central identity token source(s).
+// If no sources are provided, the manager uses the default sources:
+//  1. CARABINER_CREDENTIALS environment variable
+//  2. os.UserConfigDir()/carabiner/identity.json
+//
 // Use WithServer to configure the deadrop exchange server URL.
-func NewManager(ctx context.Context, source TokenSource, opts ...Option) (*Manager, error) {
-	if source == nil {
-		return nil, errors.New("token source is required")
+func NewManager(ctx context.Context, opts ...Option) (*Manager, error) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	m := &Manager{
+		tokens:        make(map[string]*managedToken),
+		refreshBuffer: 0.2, // Default: refresh when 20% of lifetime remains
+		maxRetries:    5,
+		retryInterval: time.Second,
+		ctx:           ctx,
+		cancel:        cancel,
+	}
+
+	// Apply options first to collect token sources
+	for _, opt := range opts {
+		opt(m)
+	}
+
+	// Resolve the central token source
+	if len(m.centralSources) > 0 {
+		// Use sources provided via options
+		if len(m.centralSources) == 1 {
+			m.centralSource = m.centralSources[0]
+		} else {
+			m.centralSource = NewChainedTokenSource(m.centralSources...)
+		}
+	} else {
+		// Use default sources
+		defaultSource, err := DefaultTokenSource()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("creating default token source: %w", err)
+		}
+		m.centralSource = defaultSource
 	}
 
 	// Fetch and validate the initial central token
-	token, err := source.Token(ctx)
+	token, err := m.centralSource.Token(ctx)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("getting initial token: %w", err)
 	}
 
 	exp, err := extractExpiry(token)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("invalid central token: %w", err)
 	}
 	if time.Now().After(exp) {
+		cancel()
 		return nil, errors.New("central token is expired")
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-
-	m := &Manager{
-		centralSource:         source,
-		centralToken:          token,
-		centralTokenExpiresAt: exp,
-		tokens:                make(map[string]*managedToken),
-		refreshBuffer:         0.2, // Default: refresh when 20% of lifetime remains
-		maxRetries:            5,
-		retryInterval:         time.Second,
-		ctx:                   ctx,
-		cancel:                cancel,
-	}
-
-	for _, opt := range opts {
-		opt(m)
-	}
+	m.centralToken = token
+	m.centralTokenExpiresAt = exp
 
 	// Validate server is configured
 	if m.server == "" {

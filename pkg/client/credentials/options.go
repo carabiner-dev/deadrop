@@ -63,3 +63,14 @@ func WithHTTPClient(client *http.Client) Option {
 		}
 	}
 }
+
+// WithTokenSource adds one or more TokenSources for the central identity token.
+// Multiple sources are tried in order until one succeeds.
+// If no sources are provided via this option, the Manager uses the default sources:
+// 1. CARABINER_CREDENTIALS environment variable
+// 2. os.UserConfigDir()/carabiner/identity.json
+func WithTokenSource(sources ...TokenSource) Option {
+	return func(m *Manager) {
+		m.centralSources = append(m.centralSources, sources...)
+	}
+}
