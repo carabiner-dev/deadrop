@@ -49,6 +49,11 @@ type Manager struct {
 	client        *exchange.Client
 	tokens        map[string]*managedToken
 
+	// Cached central token state
+	centralToken          string
+	centralTokenExpiresAt time.Time
+	centralTokenRefreshing bool
+
 	// refreshBuffer is the fraction of lifetime remaining to trigger refresh
 	// (e.g., 0.2 = refresh at 80% of lifetime)
 	refreshBuffer float64
@@ -69,7 +74,7 @@ func NewManager(ctx context.Context, source TokenSource, opts ...Option) (*Manag
 		return nil, errors.New("token source is required")
 	}
 
-	// Validate the source by fetching and checking the token
+	// Fetch and validate the initial central token
 	token, err := source.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting initial token: %w", err)
@@ -86,13 +91,15 @@ func NewManager(ctx context.Context, source TokenSource, opts ...Option) (*Manag
 	ctx, cancel := context.WithCancel(ctx)
 
 	m := &Manager{
-		centralSource: source,
-		tokens:        make(map[string]*managedToken),
-		refreshBuffer: 0.2, // Default: refresh when 20% of lifetime remains
-		maxRetries:    5,
-		retryInterval: time.Second,
-		ctx:           ctx,
-		cancel:        cancel,
+		centralSource:         source,
+		centralToken:          token,
+		centralTokenExpiresAt: exp,
+		tokens:                make(map[string]*managedToken),
+		refreshBuffer:         0.2, // Default: refresh when 20% of lifetime remains
+		maxRetries:            5,
+		retryInterval:         time.Second,
+		ctx:                   ctx,
+		cancel:                cancel,
 	}
 
 	for _, opt := range opts {
@@ -230,6 +237,158 @@ func (m *Manager) Close() error {
 	return nil
 }
 
+// getCentralToken returns the cached central token, refreshing from source if needed.
+// It uses the same refresh buffer logic as derived tokens.
+func (m *Manager) getCentralToken(ctx context.Context) (string, error) {
+	m.mu.RLock()
+	token := m.centralToken
+	expiresAt := m.centralTokenExpiresAt
+	refreshing := m.centralTokenRefreshing
+	m.mu.RUnlock()
+
+	now := time.Now()
+
+	// Calculate refresh threshold using the same buffer as derived tokens
+	lifetime := expiresAt.Sub(now)
+	refreshThreshold := expiresAt.Add(-time.Duration(float64(lifetime) * m.refreshBuffer))
+
+	// If token is still valid and not approaching expiry, return it
+	if now.Before(expiresAt) && token != "" {
+		// Trigger background refresh if approaching expiry
+		if now.After(refreshThreshold) && !refreshing {
+			go m.refreshCentralToken()
+		}
+		return token, nil
+	}
+
+	// Token is expired or missing - need to refresh synchronously
+	if refreshing {
+		return m.waitForCentralTokenRefresh(ctx)
+	}
+
+	return m.refreshCentralTokenSync(ctx)
+}
+
+// refreshCentralToken refreshes the central token from the source in the background.
+func (m *Manager) refreshCentralToken() {
+	m.mu.Lock()
+	if m.centralTokenRefreshing {
+		m.mu.Unlock()
+		return
+	}
+	m.centralTokenRefreshing = true
+	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		m.centralTokenRefreshing = false
+		m.mu.Unlock()
+	}()
+
+	token, err := m.centralSource.Token(m.ctx)
+	if err != nil {
+		return // Background refresh failed, will retry on next access
+	}
+
+	exp, err := extractExpiry(token)
+	if err != nil {
+		return
+	}
+
+	m.mu.Lock()
+	m.centralToken = token
+	m.centralTokenExpiresAt = exp
+	m.mu.Unlock()
+}
+
+// refreshCentralTokenSync refreshes the central token synchronously with retries.
+func (m *Manager) refreshCentralTokenSync(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	if m.centralTokenRefreshing {
+		m.mu.Unlock()
+		return m.waitForCentralTokenRefresh(ctx)
+	}
+	m.centralTokenRefreshing = true
+	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		m.centralTokenRefreshing = false
+		m.mu.Unlock()
+	}()
+
+	var lastErr error
+	retryInterval := m.retryInterval
+
+	for attempt := 0; attempt <= m.maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-m.ctx.Done():
+				return "", m.ctx.Err()
+			case <-time.After(retryInterval):
+				retryInterval *= 2
+			}
+		}
+
+		token, err := m.centralSource.Token(ctx)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		exp, err := extractExpiry(token)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if time.Now().After(exp) {
+			lastErr = errors.New("refreshed central token is expired")
+			continue
+		}
+
+		m.mu.Lock()
+		m.centralToken = token
+		m.centralTokenExpiresAt = exp
+		m.mu.Unlock()
+
+		return token, nil
+	}
+
+	return "", fmt.Errorf("central token refresh failed after %d attempts: %w", m.maxRetries+1, lastErr)
+}
+
+// waitForCentralTokenRefresh waits for an ongoing central token refresh to complete.
+func (m *Manager) waitForCentralTokenRefresh(ctx context.Context) (string, error) {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-m.ctx.Done():
+			return "", m.ctx.Err()
+		case <-ticker.C:
+			m.mu.RLock()
+			refreshing := m.centralTokenRefreshing
+			token := m.centralToken
+			expiresAt := m.centralTokenExpiresAt
+			m.mu.RUnlock()
+
+			if !refreshing {
+				if time.Now().Before(expiresAt) && token != "" {
+					return token, nil
+				}
+				// Refresh completed but token still invalid - retry
+				return m.refreshCentralTokenSync(ctx)
+			}
+		}
+	}
+}
+
 // refreshToken performs the actual token exchange with retry logic.
 func (m *Manager) refreshToken(ctx context.Context, id string, mt *managedToken) error {
 	mt.mu.Lock()
@@ -248,8 +407,8 @@ func (m *Manager) refreshToken(ctx context.Context, id string, mt *managedToken)
 		mt.mu.Unlock()
 	}()
 
-	// Get the current central token from the source
-	centralToken, err := m.centralSource.Token(ctx)
+	// Get the central token (refreshing from source if needed)
+	centralToken, err := m.getCentralToken(ctx)
 	if err != nil {
 		mt.mu.Lock()
 		mt.lastError = err

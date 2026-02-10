@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -360,5 +361,88 @@ func TestOptions(t *testing.T) {
 	}
 	if m.retryInterval != 2*time.Second {
 		t.Errorf("retryInterval = %v, want 2s", m.retryInterval)
+	}
+}
+
+// countingTokenSource wraps a TokenSource and counts how many times Token() is called.
+type countingTokenSource struct {
+	source TokenSource
+	count  int
+	mu     sync.Mutex
+}
+
+func (c *countingTokenSource) Token(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	c.count++
+	c.mu.Unlock()
+	return c.source.Token(ctx)
+}
+
+func (c *countingTokenSource) Count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.count
+}
+
+func TestCentralTokenCaching(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"access_token":      createTestJWT(time.Now().Add(time.Hour)),
+			"token_type":        "Bearer",
+			"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
+			"expires_in":        3600,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	// Create a counting source to track how many times the central token is read
+	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
+	countingSource := &countingTokenSource{
+		source: NewStaticTokenSource(centralToken),
+	}
+
+	m, err := NewManager(context.Background(), countingSource, WithServer(server.URL))
+	if err != nil {
+		t.Fatalf("NewManager() error: %v", err)
+	}
+	defer m.Close()
+
+	// Initial read happens during NewManager
+	if count := countingSource.Count(); count != 1 {
+		t.Errorf("Expected 1 source read after NewManager, got %d", count)
+	}
+
+	ctx := context.Background()
+
+	// Register multiple tokens
+	for i := 0; i < 3; i++ {
+		err = m.Register(ctx, fmt.Sprintf("token-%d", i), ExchangeSpec{
+			Audience: []string{"https://api.example.com"},
+		})
+		if err != nil {
+			t.Fatalf("Register() error: %v", err)
+		}
+	}
+
+	// Central token should still only be read once (it's cached)
+	if count := countingSource.Count(); count != 1 {
+		t.Errorf("Expected 1 source read after registrations, got %d", count)
+	}
+
+	// Access tokens multiple times
+	for i := 0; i < 10; i++ {
+		for j := 0; j < 3; j++ {
+			_, err := m.Token(ctx, fmt.Sprintf("token-%d", j))
+			if err != nil {
+				t.Errorf("Token() error: %v", err)
+			}
+		}
+	}
+
+	// Central token should still only be read once (cached, not expired)
+	if count := countingSource.Count(); count != 1 {
+		t.Errorf("Expected 1 source read after token accesses, got %d", count)
 	}
 }
