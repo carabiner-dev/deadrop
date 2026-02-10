@@ -40,14 +40,14 @@ type managedToken struct {
 }
 
 // Manager manages credential sessions by handling token lifecycle.
-// It uses a central identity token to exchange for short lived
+// It uses a central identity token source to exchange for short lived
 // audience-specific tokens.
 type Manager struct {
-	mu           sync.RWMutex
-	centralToken string
-	server       string
-	client       *exchange.Client
-	tokens       map[string]*managedToken
+	mu            sync.RWMutex
+	centralSource TokenSource
+	server        string
+	client        *exchange.Client
+	tokens        map[string]*managedToken
 
 	// refreshBuffer is the fraction of lifetime remaining to trigger refresh
 	// (e.g., 0.2 = refresh at 80% of lifetime)
@@ -62,15 +62,20 @@ type Manager struct {
 }
 
 // NewManager creates a new credential manager.
-// The centralToken is the long-lived JWT used as the identity for all exchanges.
+// The source provides the central identity token used for all exchanges.
 // Use WithServer to configure the deadrop exchange server URL.
-func NewManager(ctx context.Context, centralToken string, opts ...Option) (*Manager, error) {
-	if centralToken == "" {
-		return nil, errors.New("central token is required")
+func NewManager(ctx context.Context, source TokenSource, opts ...Option) (*Manager, error) {
+	if source == nil {
+		return nil, errors.New("token source is required")
 	}
 
-	// Validate central token is not expired
-	exp, err := extractExpiry(centralToken)
+	// Validate the source by fetching and checking the token
+	token, err := source.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting initial token: %w", err)
+	}
+
+	exp, err := extractExpiry(token)
 	if err != nil {
 		return nil, fmt.Errorf("invalid central token: %w", err)
 	}
@@ -81,7 +86,7 @@ func NewManager(ctx context.Context, centralToken string, opts ...Option) (*Mana
 	ctx, cancel := context.WithCancel(ctx)
 
 	m := &Manager{
-		centralToken:  centralToken,
+		centralSource: source,
 		tokens:        make(map[string]*managedToken),
 		refreshBuffer: 0.2, // Default: refresh when 20% of lifetime remains
 		maxRetries:    5,
@@ -243,8 +248,17 @@ func (m *Manager) refreshToken(ctx context.Context, id string, mt *managedToken)
 		mt.mu.Unlock()
 	}()
 
+	// Get the current central token from the source
+	centralToken, err := m.centralSource.Token(ctx)
+	if err != nil {
+		mt.mu.Lock()
+		mt.lastError = err
+		mt.mu.Unlock()
+		return fmt.Errorf("getting central token: %w", err)
+	}
+
 	req := &exchange.ExchangeRequest{
-		SubjectToken: m.centralToken,
+		SubjectToken: centralToken,
 		Audience:     spec.Audience,
 		Scope:        spec.Scope,
 		Resource:     spec.Resource,

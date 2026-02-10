@@ -33,35 +33,42 @@ func TestNewManager(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		token       string
+		source      TokenSource
 		server      string
 		wantErr     bool
 		errContains string
 	}{
 		{
 			name:        "valid token and server",
-			token:       validToken,
+			source:      NewStaticTokenSource(validToken),
 			server:      "https://auth.example.com",
 			wantErr:     false,
 			errContains: "",
 		},
 		{
-			name:        "empty token",
-			token:       "",
+			name:        "nil source",
+			source:      nil,
 			server:      "https://auth.example.com",
 			wantErr:     true,
-			errContains: "central token is required",
+			errContains: "token source is required",
+		},
+		{
+			name:        "empty token",
+			source:      NewStaticTokenSource(""),
+			server:      "https://auth.example.com",
+			wantErr:     true,
+			errContains: "static token is empty",
 		},
 		{
 			name:        "empty server",
-			token:       validToken,
+			source:      NewStaticTokenSource(validToken),
 			server:      "",
 			wantErr:     true,
 			errContains: "server URL is required",
 		},
 		{
 			name:        "expired token",
-			token:       expiredToken,
+			source:      NewStaticTokenSource(expiredToken),
 			server:      "https://auth.example.com",
 			wantErr:     true,
 			errContains: "expired",
@@ -74,7 +81,7 @@ func TestNewManager(t *testing.T) {
 			if tt.server != "" {
 				opts = append(opts, WithServer(tt.server))
 			}
-			m, err := NewManager(context.Background(), tt.token, opts...)
+			m, err := NewManager(context.Background(), tt.source, opts...)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("NewManager() expected error containing %q, got nil", tt.errContains)
@@ -108,7 +115,7 @@ func TestManagerRegister(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
+	m, err := NewManager(context.Background(), NewStaticTokenSource(centralToken), WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -161,7 +168,7 @@ func TestManagerToken(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
+	m, err := NewManager(context.Background(), NewStaticTokenSource(centralToken), WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -208,7 +215,7 @@ func TestManagerTokenSource(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
+	m, err := NewManager(context.Background(), NewStaticTokenSource(centralToken), WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -267,7 +274,7 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
+	m, err := NewManager(context.Background(), NewStaticTokenSource(centralToken), WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -334,7 +341,7 @@ func TestExtractExpiry(t *testing.T) {
 func TestOptions(t *testing.T) {
 	validToken := createTestJWT(time.Now().Add(time.Hour))
 
-	m, err := NewManager(context.Background(), validToken,
+	m, err := NewManager(context.Background(), NewStaticTokenSource(validToken),
 		WithServer("https://auth.example.com"),
 		WithRefreshBuffer(0.3),
 		WithMaxRetries(10),
