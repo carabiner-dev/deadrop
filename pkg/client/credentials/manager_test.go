@@ -70,7 +70,11 @@ func TestNewManager(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m, err := NewManager(tt.token, tt.server)
+			var opts []Option
+			if tt.server != "" {
+				opts = append(opts, WithServer(tt.server))
+			}
+			m, err := NewManager(context.Background(), tt.token, opts...)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("NewManager() expected error containing %q, got nil", tt.errContains)
@@ -104,7 +108,7 @@ func TestManagerRegister(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(centralToken, server.URL)
+	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -157,7 +161,7 @@ func TestManagerToken(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(centralToken, server.URL)
+	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -204,7 +208,7 @@ func TestManagerTokenSource(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(centralToken, server.URL)
+	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -263,7 +267,7 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	defer server.Close()
 
 	centralToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	m, err := NewManager(centralToken, server.URL)
+	m, err := NewManager(context.Background(), centralToken, WithServer(server.URL))
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
@@ -330,7 +334,8 @@ func TestExtractExpiry(t *testing.T) {
 func TestOptions(t *testing.T) {
 	validToken := createTestJWT(time.Now().Add(time.Hour))
 
-	m, err := NewManager(validToken, "https://auth.example.com",
+	m, err := NewManager(context.Background(), validToken,
+		WithServer("https://auth.example.com"),
 		WithRefreshBuffer(0.3),
 		WithMaxRetries(10),
 		WithRetryInterval(2*time.Second),

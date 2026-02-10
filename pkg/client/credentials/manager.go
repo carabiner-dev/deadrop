@@ -40,15 +40,22 @@ type managedToken struct {
 }
 
 // Manager manages credential sessions by handling token lifecycle.
-// It uses a central identity token to exchange for audience-specific tokens.
+// It uses a central identity token to exchange for short lived
+// audience-specific tokens.
 type Manager struct {
-	mu            sync.RWMutex
-	centralToken  string
-	server        string
-	client        *exchange.Client
-	tokens        map[string]*managedToken
-	refreshBuffer float64       // Fraction of lifetime to trigger refresh (e.g., 0.2 = refresh at 80% of lifetime)
-	maxRetries    int           // Maximum retry attempts for exchange
+	mu           sync.RWMutex
+	centralToken string
+	server       string
+	client       *exchange.Client
+	tokens       map[string]*managedToken
+
+	// refreshBuffer is the fraction of lifetime remaining to trigger refresh
+	// (e.g., 0.2 = refresh at 80% of lifetime)
+	refreshBuffer float64
+
+	// maxRetries controls how many times we'll attempt exchanging when an error
+	maxRetries int
+
 	retryInterval time.Duration // Initial retry interval (exponential backoff)
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -56,13 +63,10 @@ type Manager struct {
 
 // NewManager creates a new credential manager.
 // The centralToken is the long-lived JWT used as the identity for all exchanges.
-// The server is the deadrop exchange server URL.
-func NewManager(ctx context.Context, centralToken, server string, opts ...Option) (*Manager, error) {
+// Use WithServer to configure the deadrop exchange server URL.
+func NewManager(ctx context.Context, centralToken string, opts ...Option) (*Manager, error) {
 	if centralToken == "" {
 		return nil, errors.New("central token is required")
-	}
-	if server == "" {
-		return nil, errors.New("server URL is required")
 	}
 
 	// Validate central token is not expired
@@ -78,8 +82,6 @@ func NewManager(ctx context.Context, centralToken, server string, opts ...Option
 
 	m := &Manager{
 		centralToken:  centralToken,
-		server:        server,
-		client:        exchange.NewClient(server),
 		tokens:        make(map[string]*managedToken),
 		refreshBuffer: 0.2, // Default: refresh when 20% of lifetime remains
 		maxRetries:    5,
@@ -92,10 +94,23 @@ func NewManager(ctx context.Context, centralToken, server string, opts ...Option
 		opt(m)
 	}
 
+	// Validate server is configured
+	if m.server == "" {
+		cancel()
+		return nil, errors.New("server URL is required (use WithServer option)")
+	}
+
+	// Initialize exchange client if not already set by options
+	if m.client == nil {
+		m.client = exchange.NewClient(m.server)
+	}
+
 	return m, nil
 }
 
-// Register adds a new exchange specification and immediately exchanges for a token.
+// Register adds a new exchange specification struct and immediately calls its
+// endpoint to exchange a token.
+//
 // The id is used to retrieve the token later via Token() or TokenSource().
 func (m *Manager) Register(ctx context.Context, id string, spec ExchangeSpec) error {
 	if id == "" {
@@ -117,7 +132,8 @@ func (m *Manager) Register(ctx context.Context, id string, spec ExchangeSpec) er
 	m.tokens[id] = mt
 	m.mu.Unlock()
 
-	// Perform initial exchange eagerly
+	// Perform initial exchange early, if the exchange fails, the new
+	// token registration entirely fails.
 	if err := m.refreshToken(ctx, id, mt); err != nil {
 		m.mu.Lock()
 		delete(m.tokens, id)

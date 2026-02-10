@@ -13,6 +13,13 @@ import (
 // Option is a functional option for configuring the Manager.
 type Option func(*Manager)
 
+// WithServer sets the deadrop exchange server URL.
+func WithServer(server string) Option {
+	return func(m *Manager) {
+		m.server = server
+	}
+}
+
 // WithRefreshBuffer sets the refresh buffer as a fraction of token lifetime.
 // For example, 0.2 means refresh when 20% of the token lifetime remains
 // (i.e., at 80% of the way through the token's validity period).
