@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/carabiner-dev/command"
+	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/spf13/cobra"
 )
 
@@ -97,9 +98,17 @@ func readFromFile(path string) (string, error) {
 
 // readFromCarabinerIdentity reads the token from the default carabiner identity file
 func readFromCarabinerIdentity() (string, error) {
-	identityPath, err := getCarabinerIdentityPath()
-	if err != nil {
-		return "", fmt.Errorf("getting identity path: %w", err)
+	// Try loading from the default session
+	token, _, err := credentials.LoadDefaultIdentity()
+	if err == nil {
+		return token, nil
+	}
+
+	// If no session exists, try the legacy path for backwards compatibility
+	identityPath, pathErr := credentials.GetDefaultIdentityPath()
+	if pathErr != nil {
+		// Return original error if we can't get any path
+		return "", fmt.Errorf("no carabiner identity found (run 'deadrop login' first): %w", err)
 	}
 
 	data, err := os.ReadFile(identityPath)
@@ -110,7 +119,7 @@ func readFromCarabinerIdentity() (string, error) {
 		return "", fmt.Errorf("reading identity file: %w", err)
 	}
 
-	token := strings.TrimSpace(string(data))
+	token = strings.TrimSpace(string(data))
 	if token == "" {
 		return "", fmt.Errorf("carabiner identity file is empty")
 	}

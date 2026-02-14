@@ -4,14 +4,9 @@
 package cmd
 
 import (
-	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/carabiner-dev/command"
@@ -124,7 +119,7 @@ Examples:
 
 			// Check for cached identity token for this server (unless --force)
 			if !opts.Force {
-				if token, exp, err := loadCachedIdentityForServer(ctx, cfg.ServerURL); err == nil {
+				if token, exp, err := credentials.LoadIdentity(cfg.ServerURL); err == nil {
 					timeUntil := time.Until(exp)
 					fmt.Fprintf(os.Stderr, "Using cached identity for %s (expires in %v)\n", cfg.ServerURL, timeUntil.Round(time.Second))
 					if opts.PrintToken {
@@ -170,11 +165,11 @@ Examples:
 			}
 
 			// Save identity token to session
-			if err := saveSessionIdentity(cfg.ServerURL, exchangeResp.AccessToken); err != nil {
+			if err := credentials.SaveIdentity(cfg.ServerURL, exchangeResp.AccessToken); err != nil {
 				return fmt.Errorf("failed to save identity: %w", err)
 			}
 
-			identityPath, _ := getSessionIdentityPath(cfg.ServerURL)
+			identityPath, _ := credentials.GetSessionIdentityPath(cfg.ServerURL)
 			fmt.Fprintf(os.Stderr, "Identity saved to %s\n", identityPath)
 
 			if opts.PrintToken {
@@ -186,139 +181,4 @@ Examples:
 	}
 	opts.AddFlags(cmd)
 	parent.AddCommand(cmd)
-}
-
-// saveSessionIdentity saves the token to the session-specific identity file for a server.
-func saveSessionIdentity(serverURL, token string) error {
-	// Get or create session for this server
-	_, err := getOrCreateSession(serverURL)
-	if err != nil {
-		return fmt.Errorf("getting session: %w", err)
-	}
-
-	identityPath, err := getSessionIdentityPath(serverURL)
-	if err != nil {
-		return err
-	}
-
-	// Ensure the directory exists
-	identityDir := filepath.Dir(identityPath)
-	if err := os.MkdirAll(identityDir, 0700); err != nil {
-		return fmt.Errorf("creating session directory: %w", err)
-	}
-
-	// Write token atomically
-	tempPath := identityPath + ".tmp"
-	if err := os.WriteFile(tempPath, []byte(token+"\n"), 0600); err != nil {
-		return fmt.Errorf("writing identity file: %w", err)
-	}
-
-	if err := os.Rename(tempPath, identityPath); err != nil {
-		os.Remove(tempPath) //nolint:errcheck
-		return fmt.Errorf("renaming identity file: %w", err)
-	}
-
-	return nil
-}
-
-// loadCachedIdentityForServer loads and validates the cached identity token for a specific server.
-func loadCachedIdentityForServer(ctx context.Context, serverURL string) (string, time.Time, error) {
-	identityPath, err := getSessionIdentityPath(serverURL)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-
-	data, err := os.ReadFile(identityPath)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-
-	token := strings.TrimSpace(string(data))
-
-	if token == "" {
-		return "", time.Time{}, errors.New("identity file is empty")
-	}
-
-	// Extract and validate expiry
-	exp, err := extractTokenExpiry(token)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-
-	if time.Now().After(exp) {
-		return "", time.Time{}, errors.New("cached token is expired")
-	}
-
-	return token, exp, nil
-}
-
-// getCarabinerIdentityPath returns the path to the default carabiner identity file.
-// This uses the default session if one exists.
-func getCarabinerIdentityPath() (string, error) {
-	// Try to get the default session's identity path
-	identityPath, err := getDefaultIdentityPath()
-	if err == nil {
-		return identityPath, nil
-	}
-
-	// Fallback to legacy path for backwards compatibility
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("getting user config directory: %w", err)
-	}
-	return filepath.Join(configDir, credentials.DefaultConfigDir, credentials.DefaultCredentialsFile), nil
-}
-
-// extractTokenExpiry extracts the expiry time from a JWT token.
-func extractTokenExpiry(token string) (time.Time, error) {
-	parts := splitJWT(token)
-	if len(parts) != 3 {
-		return time.Time{}, errors.New("invalid JWT format")
-	}
-
-	// Decode the payload (second part)
-	payload, err := base64DecodeSegment(parts[1])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("decoding payload: %w", err)
-	}
-
-	var claims struct {
-		Exp int64 `json:"exp"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return time.Time{}, fmt.Errorf("parsing claims: %w", err)
-	}
-
-	if claims.Exp == 0 {
-		return time.Time{}, errors.New("no expiry claim in token")
-	}
-
-	return time.Unix(claims.Exp, 0), nil
-}
-
-// splitJWT splits a JWT into its parts.
-func splitJWT(token string) []string {
-	var parts []string
-	start := 0
-	for i := 0; i < len(token); i++ {
-		if token[i] == '.' {
-			parts = append(parts, token[start:i])
-			start = i + 1
-		}
-	}
-	parts = append(parts, token[start:])
-	return parts
-}
-
-// base64DecodeSegment decodes a base64url encoded segment.
-func base64DecodeSegment(seg string) ([]byte, error) {
-	// Add padding if needed
-	switch len(seg) % 4 {
-	case 2:
-		seg += "=="
-	case 3:
-		seg += "="
-	}
-
-	return base64.URLEncoding.DecodeString(seg)
 }

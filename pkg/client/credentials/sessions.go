@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 Carabiner Systems, Inc
 // SPDX-License-Identifier: Apache-2.0
 
-package cmd
+package credentials
 
 import (
 	"crypto/rand"
@@ -10,9 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
-
-	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 )
 
 const (
@@ -33,26 +32,26 @@ type SessionsConfig struct {
 	Default  string                  `json:"default,omitempty"`
 }
 
-// getConfigDir returns the carabiner config directory path
-func getConfigDir() (string, error) {
+// GetConfigDir returns the carabiner config directory path
+func GetConfigDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("getting user config directory: %w", err)
 	}
-	return filepath.Join(configDir, credentials.DefaultConfigDir), nil
+	return filepath.Join(configDir, DefaultConfigDir), nil
 }
 
 // getSessionsConfigPath returns the path to the sessions.json file
 func getSessionsConfigPath() (string, error) {
-	configDir, err := getConfigDir()
+	configDir, err := GetConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(configDir, sessionsFileName), nil
 }
 
-// loadSessionsConfig loads the sessions configuration from disk
-func loadSessionsConfig() (*SessionsConfig, error) {
+// LoadSessionsConfig loads the sessions configuration from disk
+func LoadSessionsConfig() (*SessionsConfig, error) {
 	configPath, err := getSessionsConfigPath()
 	if err != nil {
 		return nil, err
@@ -122,9 +121,9 @@ func generateSessionDir() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// getOrCreateSession gets an existing session for a server or creates a new one
-func getOrCreateSession(serverURL string) (*SessionInfo, error) {
-	config, err := loadSessionsConfig()
+// GetOrCreateSession gets an existing session for a server or creates a new one
+func GetOrCreateSession(serverURL string) (*SessionInfo, error) {
+	config, err := LoadSessionsConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +157,7 @@ func getOrCreateSession(serverURL string) (*SessionInfo, error) {
 	}
 
 	// Create the session directory
-	sessionDir, err := getSessionDir(serverURL)
+	sessionDir, err := GetSessionDir(serverURL)
 	if err != nil {
 		return nil, err
 	}
@@ -169,9 +168,9 @@ func getOrCreateSession(serverURL string) (*SessionInfo, error) {
 	return session, nil
 }
 
-// getSessionDir returns the directory path for a server's session
-func getSessionDir(serverURL string) (string, error) {
-	config, err := loadSessionsConfig()
+// GetSessionDir returns the directory path for a server's session
+func GetSessionDir(serverURL string) (string, error) {
+	config, err := LoadSessionsConfig()
 	if err != nil {
 		return "", err
 	}
@@ -181,7 +180,7 @@ func getSessionDir(serverURL string) (string, error) {
 		return "", fmt.Errorf("no session found for server %s", serverURL)
 	}
 
-	configDir, err := getConfigDir()
+	configDir, err := GetConfigDir()
 	if err != nil {
 		return "", err
 	}
@@ -189,18 +188,18 @@ func getSessionDir(serverURL string) (string, error) {
 	return filepath.Join(configDir, session.Dir), nil
 }
 
-// getSessionIdentityPath returns the path to the identity file for a server's session
-func getSessionIdentityPath(serverURL string) (string, error) {
-	sessionDir, err := getSessionDir(serverURL)
+// GetSessionIdentityPath returns the path to the identity file for a server's session
+func GetSessionIdentityPath(serverURL string) (string, error) {
+	sessionDir, err := GetSessionDir(serverURL)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(sessionDir, credentials.DefaultCredentialsFile), nil
+	return filepath.Join(sessionDir, DefaultCredentialsFile), nil
 }
 
-// getDefaultSession returns the default session info, if any
-func getDefaultSession() (*SessionInfo, string, error) {
-	config, err := loadSessionsConfig()
+// GetDefaultSession returns the default session info, if any
+func GetDefaultSession() (*SessionInfo, string, error) {
+	config, err := LoadSessionsConfig()
 	if err != nil {
 		return nil, "", err
 	}
@@ -217,18 +216,18 @@ func getDefaultSession() (*SessionInfo, string, error) {
 	return session, config.Default, nil
 }
 
-// getDefaultIdentityPath returns the path to the default session's identity file
-func getDefaultIdentityPath() (string, error) {
-	_, serverURL, err := getDefaultSession()
+// GetDefaultIdentityPath returns the path to the default session's identity file
+func GetDefaultIdentityPath() (string, error) {
+	_, serverURL, err := GetDefaultSession()
 	if err != nil {
 		return "", err
 	}
-	return getSessionIdentityPath(serverURL)
+	return GetSessionIdentityPath(serverURL)
 }
 
-// setDefaultSession sets the default session to the specified server
-func setDefaultSession(serverURL string) error {
-	config, err := loadSessionsConfig()
+// SetDefaultSession sets the default session to the specified server
+func SetDefaultSession(serverURL string) error {
+	config, err := LoadSessionsConfig()
 	if err != nil {
 		return err
 	}
@@ -241,11 +240,86 @@ func setDefaultSession(serverURL string) error {
 	return saveSessionsConfig(config)
 }
 
-// listSessions returns all configured sessions
-func listSessions() (map[string]*SessionInfo, string, error) {
-	config, err := loadSessionsConfig()
+// ListSessions returns all configured sessions
+func ListSessions() (map[string]*SessionInfo, string, error) {
+	config, err := LoadSessionsConfig()
 	if err != nil {
 		return nil, "", err
 	}
 	return config.Sessions, config.Default, nil
 }
+
+// SaveIdentity saves the identity token to the session-specific identity file for a server.
+// This creates the session if it doesn't exist.
+func SaveIdentity(serverURL, token string) error {
+	// Get or create session for this server
+	_, err := GetOrCreateSession(serverURL)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+
+	identityPath, err := GetSessionIdentityPath(serverURL)
+	if err != nil {
+		return err
+	}
+
+	// Ensure the directory exists
+	identityDir := filepath.Dir(identityPath)
+	if err := os.MkdirAll(identityDir, 0700); err != nil {
+		return fmt.Errorf("creating session directory: %w", err)
+	}
+
+	// Write token atomically
+	tempPath := identityPath + ".tmp"
+	if err := os.WriteFile(tempPath, []byte(token+"\n"), 0600); err != nil {
+		return fmt.Errorf("writing identity file: %w", err)
+	}
+
+	if err := os.Rename(tempPath, identityPath); err != nil {
+		os.Remove(tempPath) //nolint:errcheck
+		return fmt.Errorf("renaming identity file: %w", err)
+	}
+
+	return nil
+}
+
+// LoadIdentity loads the identity token for a specific server.
+// Returns the token and its expiry time if valid.
+func LoadIdentity(serverURL string) (string, time.Time, error) {
+	identityPath, err := GetSessionIdentityPath(serverURL)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	data, err := os.ReadFile(identityPath)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", time.Time{}, fmt.Errorf("identity file is empty")
+	}
+
+	// Extract and validate expiry
+	exp, err := extractExpiry(token)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	if time.Now().After(exp) {
+		return "", time.Time{}, fmt.Errorf("cached token is expired")
+	}
+
+	return token, exp, nil
+}
+
+// LoadDefaultIdentity loads the identity token from the default session.
+func LoadDefaultIdentity() (string, time.Time, error) {
+	_, serverURL, err := GetDefaultSession()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return LoadIdentity(serverURL)
+}
+

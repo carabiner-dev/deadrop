@@ -136,13 +136,31 @@ func DefaultEnvTokenSource() *EnvTokenSource {
 }
 
 // DefaultFileTokenSource returns a TokenSource that reads from the default
-// credentials file at os.UserConfigDir()/carabiner/identity.json.
+// session's identity file. If no session exists, falls back to the legacy
+// path at os.UserConfigDir()/carabiner/identity.json.
 func DefaultFileTokenSource() (*FileTokenSource, error) {
+	// Try to get the default session's identity path
+	path, err := GetDefaultIdentityPath()
+	if err == nil {
+		return NewFileTokenSource(path), nil
+	}
+
+	// Fallback to legacy path for backwards compatibility
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting user config directory: %w", err)
 	}
-	path := filepath.Join(configDir, DefaultConfigDir, DefaultCredentialsFile)
+	path = filepath.Join(configDir, DefaultConfigDir, DefaultCredentialsFile)
+	return NewFileTokenSource(path), nil
+}
+
+// ServerFileTokenSource returns a TokenSource that reads from a specific
+// server's session identity file.
+func ServerFileTokenSource(serverURL string) (*FileTokenSource, error) {
+	path, err := GetSessionIdentityPath(serverURL)
+	if err != nil {
+		return nil, fmt.Errorf("getting session identity path: %w", err)
+	}
 	return NewFileTokenSource(path), nil
 }
 
