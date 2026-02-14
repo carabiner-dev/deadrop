@@ -4,31 +4,32 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/carabiner-dev/command"
 	"github.com/carabiner-dev/deadrop/pkg/client/config"
 	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
-	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
-	"github.com/carabiner-dev/deadrop/pkg/client/oauth"
 	"github.com/spf13/cobra"
 )
-
-// CarabinerAudience is the audience used for the central carabiner identity token.
-const CarabinerAudience = "carabiner"
 
 var _ command.OptionsSet = (*LoginOptions)(nil)
 
 type LoginOptions struct {
 	ServerOptions
-	ClientID     string
-	ClientSecret string
-	Provider     string
-	PrintToken   bool
-	Force        bool
+	LoginURL   string
+	Provider   string
+	PrintToken bool
+	Force      bool
 }
 
 var defaultLoginOptions = LoginOptions{
@@ -46,8 +47,7 @@ func (lo *LoginOptions) Validate() error {
 
 func (lo *LoginOptions) AddFlags(cmd *cobra.Command) {
 	lo.ServerOptions.AddFlags(cmd)
-	cmd.PersistentFlags().StringVar(&lo.ClientID, "client-id", "", "OAuth client ID (env: DEADROP_CLIENT_ID)")
-	cmd.PersistentFlags().StringVar(&lo.ClientSecret, "client-secret", "", "OAuth client secret (env: DEADROP_CLIENT_SECRET)")
+	cmd.PersistentFlags().StringVar(&lo.LoginURL, "login-url", "", "Login service URL (default: https://login.carabiner.dev)")
 	cmd.PersistentFlags().StringVar(&lo.Provider, "provider", defaultLoginOptions.Provider, "OAuth provider (google)")
 	cmd.PersistentFlags().BoolVar(&lo.PrintToken, "print", defaultLoginOptions.PrintToken, "Print the token to stdout")
 	cmd.PersistentFlags().BoolVar(&lo.Force, "force", false, "Force new login (ignore cached token)")
@@ -63,12 +63,12 @@ func AddLogin(parent *cobra.Command) {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Log in to obtain a Carabiner identity token",
-		Long: `Authenticates with an identity provider and exchanges the token for a Carabiner identity.
+		Long: `Authenticates with an identity provider via the Carabiner login service.
 
 This command will:
 1. Check for a cached valid identity token for the server (unless --force is used)
-2. If no valid token exists, open a browser for OAuth authentication
-3. Exchange the IdP token with the deadrop server for a Carabiner identity token
+2. If no valid token exists, open a browser for authentication
+3. Receive the Carabiner identity token from the login service
 4. Save the identity token to a server-specific session directory
 
 Sessions are stored in ~/.config/carabiner/<session-id>/identity.json with a
@@ -76,45 +76,39 @@ sessions.json file tracking which session belongs to which server.
 
 Examples:
   # Login with Google (default)
-  deadrop login
+  carabiner login
 
   # Login to a specific server
-  deadrop login --server https://auth.carabiner.dev
+  carabiner login --server https://auth.carabiner.dev
 
   # Force new login (ignore cached token)
-  deadrop login --force
+  carabiner login --force
 
   # Print token to stdout
-  deadrop login --print`,
+  carabiner login --print`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return opts.Validate()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			// Load configuration first to get server URL
+			// Load configuration
 			cfg, err := config.LoadWithDefaults()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
 
 			// Apply flag overrides
-			if opts.ClientID != "" {
-				cfg.ClientID = opts.ClientID
-			}
-			if opts.ClientSecret != "" {
-				cfg.ClientSecret = opts.ClientSecret
-			}
 			if opts.Server != "" {
 				cfg.ServerURL = opts.Server
 			}
-			if opts.Provider != "" {
-				cfg.Provider = opts.Provider
+			if opts.LoginURL != "" {
+				cfg.LoginURL = opts.LoginURL
 			}
 
-			// Validate configuration
-			if err := cfg.Validate(); err != nil {
-				return err
+			// For login, we need the server URL to be set
+			if cfg.ServerURL == "" {
+				return fmt.Errorf("server URL is required (set via --server flag or DEADROP_SERVER env var)")
 			}
 
 			// Check for cached identity token for this server (unless --force)
@@ -129,56 +123,150 @@ Examples:
 				}
 			}
 
-			// OAuth login flow
-			fmt.Fprintf(os.Stderr, "Starting %s login...\n", cfg.Provider)
-
-			oauthFlow := &oauth.OAuthFlow{
-				ClientID:     cfg.ClientID,
-				ClientSecret: cfg.ClientSecret,
-				AuthURL:      cfg.GetAuthURL(),
-				TokenURL:     cfg.GetTokenURL(),
-				IssuerURL:    cfg.GetIssuerURL(),
-				Scopes:       cfg.GetScopes(),
-			}
-
-			loginResult, err := oauthFlow.Login(ctx)
+			// Start local callback server
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
-				return fmt.Errorf("login failed: %w", err)
+				return fmt.Errorf("starting callback server: %w", err)
+			}
+			defer listener.Close()
+
+			port := listener.Addr().(*net.TCPAddr).Port
+			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+
+			// Channel to receive the token
+			tokenCh := make(chan string, 1)
+			errCh := make(chan error, 1)
+
+			// Start HTTP server to receive the token
+			server := &http.Server{
+				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/callback" {
+						http.NotFound(w, r)
+						return
+					}
+
+					if r.Method != http.MethodPost {
+						http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+						return
+					}
+
+					var payload struct {
+						Token string `json:"token"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+						http.Error(w, "Invalid request body", http.StatusBadRequest)
+						errCh <- fmt.Errorf("invalid callback payload: %w", err)
+						return
+					}
+
+					if payload.Token == "" {
+						http.Error(w, "No token in request", http.StatusBadRequest)
+						errCh <- errors.New("no token in callback")
+						return
+					}
+
+					// Success - respond to the login service
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+
+					tokenCh <- payload.Token
+				}),
 			}
 
-			fmt.Fprintln(os.Stderr, "Authentication successful")
+			go func() {
+				if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+					errCh <- err
+				}
+			}()
 
-			// Exchange IdP token for Carabiner identity token
-			fmt.Fprintln(os.Stderr, "Obtaining Carabiner identity...")
-
-			exchangeClient := exchange.NewClient(cfg.ServerURL)
-			exchangeReq := &exchange.ExchangeRequest{
-				SubjectToken:       loginResult.IDToken,
-				SubjectTokenType:   exchange.TokenTypeJWT,
-				RequestedTokenType: exchange.TokenTypeJWT,
-				Audience:           []string{CarabinerAudience},
-			}
-
-			exchangeResp, err := exchangeClient.ExchangeToken(ctx, exchangeReq)
+			// Build login URL
+			loginURL, err := buildLoginURL(cfg.LoginURL, opts.Provider, callbackURL)
 			if err != nil {
-				return fmt.Errorf("failed to obtain identity: %w", err)
+				return fmt.Errorf("building login URL: %w", err)
 			}
 
-			// Save identity token to session
-			if err := credentials.SaveIdentity(cfg.ServerURL, exchangeResp.AccessToken); err != nil {
-				return fmt.Errorf("failed to save identity: %w", err)
+			fmt.Fprintf(os.Stderr, "Opening browser for authentication...\n")
+			fmt.Fprintf(os.Stderr, "If the browser doesn't open, visit: %s\n", loginURL)
+
+			// Open browser
+			if err := openBrowser(loginURL); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not open browser: %v\n", err)
 			}
 
-			identityPath, _ := credentials.GetSessionIdentityPath(cfg.ServerURL)
-			fmt.Fprintf(os.Stderr, "Identity saved to %s\n", identityPath)
+			// Wait for token or timeout
+			fmt.Fprintf(os.Stderr, "Waiting for authentication...\n")
 
-			if opts.PrintToken {
-				fmt.Println(exchangeResp.AccessToken)
+			select {
+			case token := <-tokenCh:
+				// Shutdown the server
+				shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				defer cancel()
+				server.Shutdown(shutdownCtx) //nolint:errcheck
+
+				// Save the token
+				if err := credentials.SaveIdentity(cfg.ServerURL, token); err != nil {
+					return fmt.Errorf("saving identity: %w", err)
+				}
+
+				identityPath, _ := credentials.GetSessionIdentityPath(cfg.ServerURL)
+				fmt.Fprintf(os.Stderr, "Authentication successful!\n")
+				fmt.Fprintf(os.Stderr, "Identity saved to %s\n", identityPath)
+
+				if opts.PrintToken {
+					fmt.Println(token)
+				}
+
+				return nil
+
+			case err := <-errCh:
+				return fmt.Errorf("authentication failed: %w", err)
+
+			case <-ctx.Done():
+				return ctx.Err()
+
+			case <-time.After(5 * time.Minute):
+				return errors.New("authentication timed out after 5 minutes")
 			}
-
-			return nil
 		},
 	}
 	opts.AddFlags(cmd)
 	parent.AddCommand(cmd)
+}
+
+// buildLoginURL constructs the login service URL with callback parameter.
+func buildLoginURL(baseURL, provider, callbackURL string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+
+	// Add query parameters
+	q := u.Query()
+	q.Set("provider", provider)
+	q.Set("callback_url", callbackURL)
+	u.RawQuery = q.Encode()
+
+	// Point to the login endpoint
+	u.Path = "/auth/login"
+
+	return u.String(), nil
+}
+
+// openBrowser opens the default browser to the specified URL.
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+
+	return cmd.Start()
 }

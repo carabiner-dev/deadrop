@@ -14,14 +14,15 @@ import (
 
 // Config represents client configuration
 type Config struct {
-	// OAuth Configuration
+	// OAuth Configuration (for direct OAuth flows, not used with login service)
 	ClientID     string   `yaml:"client_id"`
 	ClientSecret string   `yaml:"client_secret"`
 	Provider     string   `yaml:"provider"` // "google", "microsoft"
 	Scopes       []string `yaml:"scopes"`
 
 	// Server Configuration
-	ServerURL string `yaml:"server_url"` // deadrop server
+	ServerURL string `yaml:"server_url"` // deadrop server for token exchange
+	LoginURL  string `yaml:"login_url"`  // login service URL (e.g., https://login.carabiner.dev)
 
 	// Token Configuration
 	Audience []string `yaml:"audience"`
@@ -68,6 +69,11 @@ func LoadWithDefaults() (*Config, error) {
 		}
 	}
 
+	// Set default login URL if not configured
+	if cfg.LoginURL == "" {
+		cfg.LoginURL = "https://login.carabiner.dev"
+	}
+
 	// Apply environment variable overrides
 	cfg.ApplyEnvVars()
 
@@ -92,6 +98,9 @@ func (c *Config) ApplyEnvVars() {
 	}
 	if v := os.Getenv("DEADROP_SERVER"); v != "" {
 		c.ServerURL = v
+	}
+	if v := os.Getenv("DEADROP_LOGIN_URL"); v != "" {
+		c.LoginURL = v
 	}
 	if v := os.Getenv("DEADROP_PROVIDER"); v != "" {
 		c.Provider = v
