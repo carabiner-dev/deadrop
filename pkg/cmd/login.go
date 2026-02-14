@@ -5,7 +5,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -142,32 +141,39 @@ Examples:
 						return
 					}
 
-					if r.Method != http.MethodPost {
-						http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-						return
-					}
-
-					var payload struct {
-						Token string `json:"token"`
-					}
-					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-						http.Error(w, "Invalid request body", http.StatusBadRequest)
-						errCh <- fmt.Errorf("invalid callback payload: %w", err)
-						return
-					}
-
-					if payload.Token == "" {
+					// Accept GET with token in query params (browser redirect from login service)
+					token := r.URL.Query().Get("token")
+					if token == "" {
 						http.Error(w, "No token in request", http.StatusBadRequest)
 						errCh <- errors.New("no token in callback")
 						return
 					}
 
-					// Success - respond to the login service
-					w.Header().Set("Content-Type", "application/json")
+					// Show success page to the user
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+					fmt.Fprint(w, `<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Successful</title>
+    <style>
+        body { font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #b24202 0%, #e5790d 100%); }
+        .card { background: white; padding: 2rem 3rem; border-radius: 10px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        .checkmark { width: 60px; height: 60px; border-radius: 50%; background: #34A853; color: white; font-size: 2rem; line-height: 60px; margin: 0 auto 1rem; }
+        h1 { color: #333; margin-bottom: 0.5rem; }
+        p { color: #666; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="checkmark">&#10003;</div>
+        <h1>Authentication Successful!</h1>
+        <p>You can close this tab and return to your terminal.</p>
+    </div>
+</body>
+</html>`)
 
-					tokenCh <- payload.Token
+					tokenCh <- token
 				}),
 			}
 
