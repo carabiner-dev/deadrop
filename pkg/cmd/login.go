@@ -27,13 +27,11 @@ var _ command.OptionsSet = (*LoginOptions)(nil)
 type LoginOptions struct {
 	ServerOptions
 	LoginURL   string
-	Provider   string
 	PrintToken bool
 	Force      bool
 }
 
 var defaultLoginOptions = LoginOptions{
-	Provider:   "google",
 	PrintToken: false,
 }
 
@@ -48,7 +46,6 @@ func (lo *LoginOptions) Validate() error {
 func (lo *LoginOptions) AddFlags(cmd *cobra.Command) {
 	lo.ServerOptions.AddFlags(cmd)
 	cmd.PersistentFlags().StringVar(&lo.LoginURL, "login-url", "", "Login service URL (default: https://login.carabiner.dev)")
-	cmd.PersistentFlags().StringVar(&lo.Provider, "provider", defaultLoginOptions.Provider, "OAuth provider (google)")
 	cmd.PersistentFlags().BoolVar(&lo.PrintToken, "print", defaultLoginOptions.PrintToken, "Print the token to stdout")
 	cmd.PersistentFlags().BoolVar(&lo.Force, "force", false, "Force new login (ignore cached token)")
 }
@@ -181,7 +178,7 @@ Examples:
 			}()
 
 			// Build login URL
-			loginURL, err := buildLoginURL(cfg.LoginURL, opts.Provider, callbackURL)
+			loginURL, err := buildLoginURL(cfg.LoginURL, callbackURL)
 			if err != nil {
 				return fmt.Errorf("building login URL: %w", err)
 			}
@@ -235,20 +232,18 @@ Examples:
 }
 
 // buildLoginURL constructs the login service URL with callback parameter.
-func buildLoginURL(baseURL, provider, callbackURL string) (string, error) {
+// This sends the user to the provider selection page where they can choose
+// their preferred authentication method.
+func buildLoginURL(baseURL, callbackURL string) (string, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}
 
-	// Add query parameters
+	// Add callback_url parameter - user will select provider on the login page
 	q := u.Query()
-	q.Set("provider", provider)
 	q.Set("callback_url", callbackURL)
 	u.RawQuery = q.Encode()
-
-	// Point to the login endpoint
-	u.Path = "/auth/login"
 
 	return u.String(), nil
 }
