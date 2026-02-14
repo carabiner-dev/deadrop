@@ -30,6 +30,7 @@ automatically manages token caching using the XDG Base Directory specification.`
 	cmd.AddLogout(rootCmd)
 	cmd.AddVerify(rootCmd)
 	cmd.AddExchange(rootCmd)
+	cmd.AddWhoami(rootCmd)
 	addVersion(rootCmd)
 
 	if err := rootCmd.Execute(); err != nil {
