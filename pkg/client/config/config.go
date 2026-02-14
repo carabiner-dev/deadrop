@@ -14,15 +14,12 @@ import (
 
 // Config represents client configuration
 type Config struct {
-	// OAuth Configuration (for direct OAuth flows, not used with login service)
-	ClientID     string   `yaml:"client_id"`
-	ClientSecret string   `yaml:"client_secret"`
-	Provider     string   `yaml:"provider"` // "google", "microsoft"
-	Scopes       []string `yaml:"scopes"`
-
 	// Server Configuration
 	ServerURL string `yaml:"server_url"` // deadrop server for token exchange
 	LoginURL  string `yaml:"login_url"`  // login service URL (e.g., https://login.carabiner.dev)
+
+	// Authentication
+	Provider string `yaml:"provider"` // OAuth provider hint (e.g., "google")
 
 	// Token Configuration
 	Audience []string `yaml:"audience"`
@@ -62,7 +59,6 @@ func LoadWithDefaults() (*Config, error) {
 		if os.IsNotExist(err) {
 			cfg = &Config{
 				Provider: "google",
-				Scopes:   []string{"openid", "email", "profile"},
 			}
 		} else {
 			return nil, err
@@ -90,12 +86,6 @@ func LoadWithDefaults() (*Config, error) {
 
 // ApplyEnvVars applies environment variable overrides
 func (c *Config) ApplyEnvVars() {
-	if v := os.Getenv("DEADROP_CLIENT_ID"); v != "" {
-		c.ClientID = v
-	}
-	if v := os.Getenv("DEADROP_CLIENT_SECRET"); v != "" {
-		c.ClientSecret = v
-	}
 	if v := os.Getenv("DEADROP_SERVER"); v != "" {
 		c.ServerURL = v
 	}
@@ -113,64 +103,4 @@ func (c *Config) ApplyEnvVars() {
 		}
 		c.Audience = audiences
 	}
-}
-
-// ApplyFlags applies command-line flag overrides
-func (c *Config) ApplyFlags(flags map[string]interface{}) {
-	if v, ok := flags["client-id"].(string); ok && v != "" {
-		c.ClientID = v
-	}
-	if v, ok := flags["client-secret"].(string); ok && v != "" {
-		c.ClientSecret = v
-	}
-	if v, ok := flags["server"].(string); ok && v != "" {
-		c.ServerURL = v
-	}
-	if v, ok := flags["provider"].(string); ok && v != "" {
-		c.Provider = v
-	}
-	if v, ok := flags["audience"].([]string); ok && len(v) > 0 {
-		c.Audience = v
-	}
-}
-
-// GetIssuerURL returns the issuer URL for the configured provider
-func (c *Config) GetIssuerURL() string {
-	defaults := GetProviderDefaults(c.Provider)
-	return defaults.IssuerURL
-}
-
-// GetAuthURL returns the authorization URL for the configured provider
-func (c *Config) GetAuthURL() string {
-	defaults := GetProviderDefaults(c.Provider)
-	return defaults.AuthURL
-}
-
-// GetTokenURL returns the token URL for the configured provider
-func (c *Config) GetTokenURL() string {
-	defaults := GetProviderDefaults(c.Provider)
-	return defaults.TokenURL
-}
-
-// GetScopes returns the scopes to use, falling back to provider defaults
-func (c *Config) GetScopes() []string {
-	if len(c.Scopes) > 0 {
-		return c.Scopes
-	}
-	defaults := GetProviderDefaults(c.Provider)
-	return defaults.Scopes
-}
-
-// Validate checks that required configuration is present
-func (c *Config) Validate() error {
-	if c.ClientID == "" {
-		return fmt.Errorf("client ID is required (set via --client-id flag or DEADROP_CLIENT_ID env var)")
-	}
-	if c.ServerURL == "" {
-		return fmt.Errorf("server URL is required (set via --server flag or DEADROP_SERVER env var)")
-	}
-	if len(c.Audience) == 0 {
-		return fmt.Errorf("audience is required (set via --audience flag or DEADROP_AUDIENCE env var)")
-	}
-	return nil
 }
