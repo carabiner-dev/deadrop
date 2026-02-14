@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/carabiner-dev/command"
@@ -70,21 +71,20 @@ func AddLogin(parent *cobra.Command) {
 		Long: `Authenticates with an identity provider and exchanges the token for a Carabiner identity.
 
 This command will:
-1. Check for a cached valid identity token (unless --force is used)
+1. Check for a cached valid identity token for the server (unless --force is used)
 2. If no valid token exists, open a browser for OAuth authentication
 3. Exchange the IdP token with the deadrop server for a Carabiner identity token
-4. Save the identity token to ` + "~/.config/carabiner/identity.json" + `
+4. Save the identity token to a server-specific session directory
 
-The saved identity token is used by all Carabiner ecosystem tools.
+Sessions are stored in ~/.config/carabiner/<session-id>/identity.json with a
+sessions.json file tracking which session belongs to which server.
 
 Examples:
   # Login with Google (default)
   deadrop login
 
-  # Login with environment variables
-  export DEADROP_CLIENT_ID="123456.apps.googleusercontent.com"
-  export DEADROP_SERVER="https://auth.carabiner.dev"
-  deadrop login
+  # Login to a specific server
+  deadrop login --server https://auth.carabiner.dev
 
   # Force new login (ignore cached token)
   deadrop login --force
@@ -97,19 +97,7 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			// Check for cached identity token (unless --force)
-			if !opts.Force {
-				if token, exp, err := loadCachedIdentity(ctx); err == nil {
-					timeUntil := time.Until(exp)
-					fmt.Fprintf(os.Stderr, "Using cached identity (expires in %v)\n", timeUntil.Round(time.Second))
-					if opts.PrintToken {
-						fmt.Println(token)
-					}
-					return nil
-				}
-			}
-
-			// Load configuration
+			// Load configuration first to get server URL
 			cfg, err := config.LoadWithDefaults()
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
@@ -132,6 +120,18 @@ Examples:
 			// Validate configuration
 			if err := cfg.Validate(); err != nil {
 				return err
+			}
+
+			// Check for cached identity token for this server (unless --force)
+			if !opts.Force {
+				if token, exp, err := loadCachedIdentityForServer(ctx, cfg.ServerURL); err == nil {
+					timeUntil := time.Until(exp)
+					fmt.Fprintf(os.Stderr, "Using cached identity for %s (expires in %v)\n", cfg.ServerURL, timeUntil.Round(time.Second))
+					if opts.PrintToken {
+						fmt.Println(token)
+					}
+					return nil
+				}
 			}
 
 			// OAuth login flow
@@ -169,12 +169,12 @@ Examples:
 				return fmt.Errorf("failed to obtain identity: %w", err)
 			}
 
-			// Save identity token
-			if err := saveCarabinerIdentity(exchangeResp.AccessToken); err != nil {
+			// Save identity token to session
+			if err := saveSessionIdentity(cfg.ServerURL, exchangeResp.AccessToken); err != nil {
 				return fmt.Errorf("failed to save identity: %w", err)
 			}
 
-			identityPath, _ := getCarabinerIdentityPath()
+			identityPath, _ := getSessionIdentityPath(cfg.ServerURL)
 			fmt.Fprintf(os.Stderr, "Identity saved to %s\n", identityPath)
 
 			if opts.PrintToken {
@@ -188,19 +188,15 @@ Examples:
 	parent.AddCommand(cmd)
 }
 
-// getCarabinerIdentityPath returns the path to the carabiner identity file.
-func getCarabinerIdentityPath() (string, error) {
-	configDir, err := os.UserConfigDir()
+// saveSessionIdentity saves the token to the session-specific identity file for a server.
+func saveSessionIdentity(serverURL, token string) error {
+	// Get or create session for this server
+	_, err := getOrCreateSession(serverURL)
 	if err != nil {
-		return "", fmt.Errorf("getting user config directory: %w", err)
+		return fmt.Errorf("getting session: %w", err)
 	}
-	return filepath.Join(configDir, credentials.DefaultConfigDir, credentials.DefaultCredentialsFile), nil
-}
 
-// saveCarabinerIdentity saves the token to the carabiner identity file.
-// This is the central location for user identity across the carabiner ecosystem.
-func saveCarabinerIdentity(token string) error {
-	identityPath, err := getCarabinerIdentityPath()
+	identityPath, err := getSessionIdentityPath(serverURL)
 	if err != nil {
 		return err
 	}
@@ -208,7 +204,7 @@ func saveCarabinerIdentity(token string) error {
 	// Ensure the directory exists
 	identityDir := filepath.Dir(identityPath)
 	if err := os.MkdirAll(identityDir, 0700); err != nil {
-		return fmt.Errorf("creating identity directory: %w", err)
+		return fmt.Errorf("creating session directory: %w", err)
 	}
 
 	// Write token atomically
@@ -225,17 +221,22 @@ func saveCarabinerIdentity(token string) error {
 	return nil
 }
 
-// loadCachedIdentity loads and validates the cached identity token.
-// Returns the token, its expiry time, and any error.
-func loadCachedIdentity(ctx context.Context) (string, time.Time, error) {
-	source, err := credentials.DefaultFileTokenSource()
+// loadCachedIdentityForServer loads and validates the cached identity token for a specific server.
+func loadCachedIdentityForServer(ctx context.Context, serverURL string) (string, time.Time, error) {
+	identityPath, err := getSessionIdentityPath(serverURL)
 	if err != nil {
 		return "", time.Time{}, err
 	}
 
-	token, err := source.Token(ctx)
+	data, err := os.ReadFile(identityPath)
 	if err != nil {
 		return "", time.Time{}, err
+	}
+
+	token := strings.TrimSpace(string(data))
+
+	if token == "" {
+		return "", time.Time{}, errors.New("identity file is empty")
 	}
 
 	// Extract and validate expiry
@@ -249,6 +250,23 @@ func loadCachedIdentity(ctx context.Context) (string, time.Time, error) {
 	}
 
 	return token, exp, nil
+}
+
+// getCarabinerIdentityPath returns the path to the default carabiner identity file.
+// This uses the default session if one exists.
+func getCarabinerIdentityPath() (string, error) {
+	// Try to get the default session's identity path
+	identityPath, err := getDefaultIdentityPath()
+	if err == nil {
+		return identityPath, nil
+	}
+
+	// Fallback to legacy path for backwards compatibility
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("getting user config directory: %w", err)
+	}
+	return filepath.Join(configDir, credentials.DefaultConfigDir, credentials.DefaultCredentialsFile), nil
 }
 
 // extractTokenExpiry extracts the expiry time from a JWT token.
