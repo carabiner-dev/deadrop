@@ -4,31 +4,31 @@
 package cmd
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/carabiner-dev/command"
-	"github.com/carabiner-dev/deadrop/pkg/client/storage"
+	"github.com/carabiner-dev/deadrop/pkg/client/config"
+	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/spf13/cobra"
 )
 
 var _ command.OptionsSet = (*TokenOptions)(nil)
 
 type TokenOptions struct {
+	ServerOptions
 	Decode bool
 }
 
 var defaultTokenOptions = TokenOptions{}
 
 func (to *TokenOptions) Validate() error {
-	return nil
+	return to.ServerOptions.Validate()
 }
 
 func (to *TokenOptions) AddFlags(cmd *cobra.Command) {
+	to.ServerOptions.AddFlags(cmd)
 	cmd.PersistentFlags().BoolVar(&to.Decode, "decode", false, "Decode and display JWT claims")
 }
 
@@ -41,88 +41,98 @@ func AddToken(parent *cobra.Command) {
 
 	cmd := &cobra.Command{
 		Use:   "token",
-		Short: "Display cached token",
-		Long: `Display the cached Carabiner token.
+		Short: "Display the cached identity token",
+		Long: `Display the cached Carabiner identity token for the configured server.
 
-Use --decode to show the JWT claims in human-readable format.`,
+Use --decode to show the JWT claims in human-readable format.
+
+Examples:
+  # Show token for default server
+  carabiner token
+
+  # Show token for a specific server
+  carabiner token --server https://auth.carabiner.dev
+
+  # Decode and display JWT claims
+  carabiner token --decode`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return opts.Validate()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-
-			// Load token from storage
-			store, err := storage.NewTokenStorage()
+			// Load configuration
+			cfg, err := config.LoadWithDefaults()
 			if err != nil {
-				return fmt.Errorf("initializing token storage: %w", err)
+				return fmt.Errorf("loading config: %w", err)
 			}
 
-			cached, err := store.LoadToken(ctx)
-			if err != nil {
-				return fmt.Errorf("no cached token found. Run 'deadrop login' first")
+			// Apply flag overrides
+			if opts.Server != "" {
+				cfg.ServerURL = opts.Server
 			}
 
-			// Check if token is expired
-			if !cached.IsValid() {
-				fmt.Fprintf(os.Stderr, "Warning: Token is expired (expired %v ago)\n",
-					time.Since(cached.ExpiresAt).Round(time.Second))
-				fmt.Fprintln(os.Stderr, "Run 'deadrop login --force' to get a new token")
-				fmt.Println()
-			}
-
-			// Print basic info
-			fmt.Fprintf(os.Stderr, "Provider:   %s\n", cached.Provider)
-			fmt.Fprintf(os.Stderr, "Server:     %s\n", cached.ServerURL)
-			fmt.Fprintf(os.Stderr, "Issued:     %s\n", cached.IssuedAt.Format(time.RFC3339))
-			fmt.Fprintf(os.Stderr, "Expires:    %s\n", cached.ExpiresAt.Format(time.RFC3339))
-			if cached.IsValid() {
-				fmt.Fprintf(os.Stderr, "Valid for:  %v\n", cached.TimeUntilExpiry().Round(time.Second))
-			}
-			fmt.Fprintln(os.Stderr)
-
-			// Decode JWT if requested
-			if opts.Decode {
-				if err := decodeJWT(cached.Token); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to decode JWT: %v\n", err)
+			// Determine which server to use
+			serverURL := cfg.ServerURL
+			if serverURL == "" {
+				// Try to get the default session
+				_, defaultServer, err := credentials.GetDefaultSession()
+				if err != nil {
+					return fmt.Errorf("no server configured and no default session found (run 'carabiner login' first)")
 				}
+				serverURL = defaultServer
+			}
+
+			// Load the identity token
+			token, exp, err := credentials.LoadIdentity(serverURL)
+			if err != nil {
+				return fmt.Errorf("no identity found for %s (run 'carabiner login' first): %w", serverURL, err)
+			}
+
+			// Check if token is close to expiring
+			timeUntil := time.Until(exp)
+			if timeUntil < 5*time.Minute {
+				fmt.Fprintf(os.Stderr, "Warning: Token expires soon (in %s)\n", timeUntil.Round(time.Second))
+				fmt.Fprintln(os.Stderr, "Run 'carabiner login --force' to get a new token")
 				fmt.Fprintln(os.Stderr)
 			}
 
-			// Print token
-			fmt.Println(cached.Token)
+			// Print info to stderr
+			fmt.Fprintf(os.Stderr, "Server:     %s\n", serverURL)
+			fmt.Fprintf(os.Stderr, "Expires:    %s (in %s)\n", exp.Format(time.RFC3339), timeUntil.Round(time.Second))
+
+			// Decode JWT if requested
+			if opts.Decode {
+				fmt.Fprintln(os.Stderr)
+				claims, err := parseTokenClaims(token)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to decode JWT: %v\n", err)
+				} else {
+					fmt.Fprintln(os.Stderr, "JWT Claims:")
+					if claims.Subject != "" {
+						fmt.Fprintf(os.Stderr, "  Subject:  %s\n", claims.Subject)
+					}
+					if claims.Email != "" {
+						fmt.Fprintf(os.Stderr, "  Email:    %s\n", claims.Email)
+					}
+					if claims.Name != "" {
+						fmt.Fprintf(os.Stderr, "  Name:     %s\n", claims.Name)
+					}
+					if claims.Issuer != "" {
+						fmt.Fprintf(os.Stderr, "  Issuer:   %s\n", claims.Issuer)
+					}
+					if claims.Provider != "" {
+						fmt.Fprintf(os.Stderr, "  Provider: %s\n", claims.Provider)
+					}
+				}
+			}
+
+			fmt.Fprintln(os.Stderr)
+
+			// Print token to stdout (for piping)
+			fmt.Println(token)
 
 			return nil
 		},
 	}
 	opts.AddFlags(cmd)
 	parent.AddCommand(cmd)
-}
-
-// decodeJWT decodes and prints JWT claims
-func decodeJWT(token string) error {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid JWT format")
-	}
-
-	// Decode payload (second part)
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return fmt.Errorf("decoding payload: %w", err)
-	}
-
-	// Pretty print JSON
-	var claims map[string]interface{}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return fmt.Errorf("parsing claims: %w", err)
-	}
-
-	fmt.Fprintln(os.Stderr, "JWT Claims:")
-	prettyJSON, err := json.MarshalIndent(claims, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(os.Stderr, string(prettyJSON))
-
-	return nil
 }

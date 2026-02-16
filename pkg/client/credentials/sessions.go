@@ -323,3 +323,60 @@ func LoadDefaultIdentity() (string, time.Time, error) {
 	return LoadIdentity(serverURL)
 }
 
+// DeleteIdentity removes the identity file for a specific server.
+func DeleteIdentity(serverURL string) error {
+	identityPath, err := GetSessionIdentityPath(serverURL)
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(identityPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil // Already deleted
+		}
+		return fmt.Errorf("deleting identity file: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteSession removes the entire session for a server, including its directory.
+func DeleteSession(serverURL string) error {
+	config, err := LoadSessionsConfig()
+	if err != nil {
+		return err
+	}
+
+	session, exists := config.Sessions[serverURL]
+	if !exists {
+		return nil // No session to delete
+	}
+
+	// Get session directory path
+	configDir, err := GetConfigDir()
+	if err != nil {
+		return err
+	}
+	sessionDir := filepath.Join(configDir, session.Dir)
+
+	// Remove session directory
+	if err := os.RemoveAll(sessionDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing session directory: %w", err)
+	}
+
+	// Remove from config
+	delete(config.Sessions, serverURL)
+
+	// Update default if needed
+	if config.Default == serverURL {
+		config.Default = ""
+		// Set a new default if there are other sessions
+		for url := range config.Sessions {
+			config.Default = url
+			break
+		}
+	}
+
+	return saveSessionsConfig(config)
+}
+

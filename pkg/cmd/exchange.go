@@ -136,8 +136,26 @@ Examples:
 			fmt.Fprintln(os.Stderr)
 
 			// Decode and show JWT claims
-			if err := decodeJWT(resp.AccessToken); err != nil {
+			claims, err := parseTokenClaims(resp.AccessToken)
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to decode JWT: %v\n", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "JWT Claims:")
+				if claims.Subject != "" {
+					fmt.Fprintf(os.Stderr, "  Subject:  %s\n", claims.Subject)
+				}
+				if claims.Email != "" {
+					fmt.Fprintf(os.Stderr, "  Email:    %s\n", claims.Email)
+				}
+				if claims.Name != "" {
+					fmt.Fprintf(os.Stderr, "  Name:     %s\n", claims.Name)
+				}
+				if claims.Issuer != "" {
+					fmt.Fprintf(os.Stderr, "  Issuer:   %s\n", claims.Issuer)
+				}
+				if len(claims.Audience) > 0 {
+					fmt.Fprintf(os.Stderr, "  Audience: %s\n", strings.Join(claims.Audience, ", "))
+				}
 			}
 			fmt.Fprintln(os.Stderr)
 
