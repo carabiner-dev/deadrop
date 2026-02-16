@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -40,7 +41,18 @@ func (to *TokenReadOptions) Config() *command.OptionsSetConfig {
 // 1. stdin (if "-" is specified or data is piped)
 // 2. --token flag (explicit file path)
 // 3. carabiner identity file (~/.config/carabiner/identity.json)
+//
+// Note: This uses context.Background() for auto-renewal. Use ReadTokenWithContext
+// for better context control.
 func (to *TokenReadOptions) ReadToken() (string, error) {
+	return to.ReadTokenWithContext(context.Background())
+}
+
+// ReadTokenWithContext reads a token with the following precedence:
+// 1. stdin (if "-" is specified or data is piped)
+// 2. --token flag (explicit file path)
+// 3. carabiner identity file (with auto-renewal if about to expire)
+func (to *TokenReadOptions) ReadTokenWithContext(ctx context.Context) (string, error) {
 	// Check if reading from stdin
 	if to.TokenPath == "-" {
 		return readFromStdin()
@@ -56,8 +68,8 @@ func (to *TokenReadOptions) ReadToken() (string, error) {
 		return readFromStdin()
 	}
 
-	// Default: read from carabiner identity file
-	return readFromCarabinerIdentity()
+	// Default: read from carabiner identity file with auto-renewal
+	return readFromCarabinerIdentity(ctx)
 }
 
 // hasStdinData checks if there's data available on stdin (piped input)
@@ -97,18 +109,36 @@ func readFromFile(path string) (string, error) {
 }
 
 // readFromCarabinerIdentity reads the token from the default carabiner identity file
-func readFromCarabinerIdentity() (string, error) {
-	// Try loading from the default session
-	token, _, err := credentials.LoadDefaultIdentity()
-	if err == nil {
-		return token, nil
+// with auto-renewal if the token is about to expire.
+func readFromCarabinerIdentity(ctx context.Context) (string, error) {
+	// Get the default session to find the server URL
+	_, serverURL, err := credentials.GetDefaultSession()
+	if err != nil {
+		// No session exists, try the legacy path for backwards compatibility
+		return readFromCarabinerIdentityLegacy()
 	}
 
-	// If no session exists, try the legacy path for backwards compatibility
+	// Load with auto-renewal
+	token, _, renewed, err := credentials.LoadIdentityWithRenewal(ctx, serverURL)
+	if err != nil {
+		if err == credentials.ErrTokenExpired {
+			return "", fmt.Errorf("identity token has expired, please run 'carabiner login' to authenticate again")
+		}
+		return "", fmt.Errorf("loading carabiner identity: %w", err)
+	}
+
+	if renewed {
+		fmt.Fprintf(os.Stderr, "Token was automatically renewed\n")
+	}
+
+	return token, nil
+}
+
+// readFromCarabinerIdentityLegacy reads from the legacy identity file path for backwards compatibility.
+func readFromCarabinerIdentityLegacy() (string, error) {
 	identityPath, pathErr := credentials.GetDefaultIdentityPath()
 	if pathErr != nil {
-		// Return original error if we can't get any path
-		return "", fmt.Errorf("no carabiner identity found (run 'deadrop login' first): %w", err)
+		return "", fmt.Errorf("no carabiner identity found (run 'deadrop login' first)")
 	}
 
 	data, err := os.ReadFile(identityPath)
@@ -119,7 +149,7 @@ func readFromCarabinerIdentity() (string, error) {
 		return "", fmt.Errorf("reading identity file: %w", err)
 	}
 
-	token = strings.TrimSpace(string(data))
+	token := strings.TrimSpace(string(data))
 	if token == "" {
 		return "", fmt.Errorf("carabiner identity file is empty")
 	}

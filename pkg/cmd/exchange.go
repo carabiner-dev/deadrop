@@ -98,8 +98,8 @@ Examples:
 			return opts.Validate()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Read token from file or stdin
-			token, err := opts.ReadToken()
+			// Read token from file or stdin (with auto-renewal for carabiner identity)
+			token, err := opts.ReadTokenWithContext(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("reading token: %w", err)
 			}

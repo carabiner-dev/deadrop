@@ -59,6 +59,8 @@ Examples:
 			return opts.Validate()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
 			// Load configuration
 			cfg, err := config.LoadWithDefaults()
 			if err != nil {
@@ -81,10 +83,17 @@ Examples:
 				serverURL = defaultServer
 			}
 
-			// Load the identity token
-			token, exp, err := credentials.LoadIdentity(serverURL)
+			// Load the identity token with auto-renewal
+			token, exp, renewed, err := credentials.LoadIdentityWithRenewal(ctx, serverURL)
 			if err != nil {
+				if err == credentials.ErrTokenExpired {
+					return fmt.Errorf("identity token has expired, please run 'carabiner login' to authenticate again")
+				}
 				return fmt.Errorf("no identity found for %s (run 'carabiner login' first): %w", serverURL, err)
+			}
+
+			if renewed {
+				fmt.Fprintf(os.Stderr, "Token was automatically renewed\n")
 			}
 
 			// Check if token is close to expiring
