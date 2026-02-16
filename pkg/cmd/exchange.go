@@ -12,6 +12,7 @@ import (
 
 	"github.com/carabiner-dev/command"
 
+	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +26,7 @@ type ExchangeOptions struct {
 	Audience []string
 	Scope    []string
 	Resource []string
+	Cache    bool // Enable token caching
 }
 
 var defaultExchangeOptions = ExchangeOptions{
@@ -54,6 +56,7 @@ func (eo *ExchangeOptions) AddFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringSliceVar(&eo.Audience, "audience", nil, "Target audience(s)")
 	cmd.PersistentFlags().StringSliceVar(&eo.Scope, "scope", nil, "Requested scope(s)")
 	cmd.PersistentFlags().StringSliceVar(&eo.Resource, "resource", nil, "Resource URI(s)")
+	cmd.PersistentFlags().BoolVar(&eo.Cache, "cache", false, "Cache exchanged tokens locally for reuse")
 }
 
 func (eo *ExchangeOptions) Config() *command.OptionsSetConfig {
@@ -92,51 +95,87 @@ Examples:
   deadrop exchange --token /path/to/token.jwt --audience https://api.example.com
 
   # Use a custom exchange server
-  deadrop exchange --server https://auth.mycompany.com --audience https://api.example.com`,
+  deadrop exchange --server https://auth.mycompany.com --audience https://api.example.com
+
+  # Use caching (reuses token if still valid)
+  deadrop exchange --audience https://api.example.com --cache`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return opts.Validate()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Read token from file or stdin (with auto-renewal for carabiner identity)
-			token, err := opts.ReadTokenWithContext(cmd.Context())
-			if err != nil {
-				return fmt.Errorf("reading token: %w", err)
+			ctx := cmd.Context()
+
+			var accessToken string
+			var expiresIn time.Duration
+			var fromCache bool
+
+			// If caching is enabled and no explicit token source, use the credentials cache
+			if opts.Cache && opts.TokenPath == "" && !hasStdinData() {
+				spec := credentials.ExchangeSpec{
+					Audience: opts.Audience,
+					Scope:    opts.Scope,
+					Resource: opts.Resource,
+				}
+
+				token, exp, exchanged, err := credentials.LoadExchangedTokenWithRenewal(ctx, opts.Server, spec)
+				if err != nil {
+					return fmt.Errorf("getting cached token: %w", err)
+				}
+
+				accessToken = token
+				expiresIn = time.Until(exp)
+				fromCache = !exchanged
+
+				if fromCache {
+					fmt.Fprintf(os.Stderr, "Using cached token (expires in %s)\n", expiresIn.Round(time.Second))
+				} else {
+					fmt.Fprintf(os.Stderr, "Exchanged and cached new token (expires in %s)\n", expiresIn.Round(time.Second))
+				}
+			} else {
+				// Read token from file or stdin (with auto-renewal for carabiner identity)
+				token, err := opts.ReadTokenWithContext(ctx)
+				if err != nil {
+					return fmt.Errorf("reading token: %w", err)
+				}
+
+				// Basic JWT format validation
+				parts := strings.Split(token, ".")
+				if len(parts) != 3 {
+					return fmt.Errorf("invalid JWT format: expected 3 parts separated by '.', got %d parts (token length: %d chars)", len(parts), len(token))
+				}
+
+				// Create exchange client
+				client := exchange.NewClient(opts.Server)
+
+				// Build request
+				req := &exchange.ExchangeRequest{
+					SubjectToken: token,
+					Audience:     opts.Audience,
+					Scope:        opts.Scope,
+					Resource:     opts.Resource,
+				}
+
+				// Perform exchange
+				fmt.Fprintf(os.Stderr, "Exchanging token with %s...\n", opts.Server)
+				resp, err := client.ExchangeToken(ctx, req)
+				if err != nil {
+					return fmt.Errorf("token exchange failed: %w", err)
+				}
+
+				accessToken = resp.AccessToken
+				expiresIn = time.Duration(resp.ExpiresIn) * time.Second
+
+				// Print metadata to stderr
+				fmt.Fprintln(os.Stderr)
+				fmt.Fprintf(os.Stderr, "Token Type:  %s\n", resp.TokenType)
+				fmt.Fprintf(os.Stderr, "Issued Type: %s\n", resp.IssuedTokenType)
+				fmt.Fprintf(os.Stderr, "Expires In:  %s\n", expiresIn)
+				fmt.Fprintln(os.Stderr)
 			}
-
-			// Basic JWT format validation
-			parts := strings.Split(token, ".")
-			if len(parts) != 3 {
-				return fmt.Errorf("invalid JWT format: expected 3 parts separated by '.', got %d parts (token length: %d chars)", len(parts), len(token))
-			}
-
-			// Create exchange client
-			client := exchange.NewClient(opts.Server)
-
-			// Build request
-			req := &exchange.ExchangeRequest{
-				SubjectToken: token,
-				Audience:     opts.Audience,
-				Scope:        opts.Scope,
-				Resource:     opts.Resource,
-			}
-
-			// Perform exchange
-			fmt.Fprintf(os.Stderr, "Exchanging token with %s...\n", opts.Server)
-			resp, err := client.ExchangeToken(cmd.Context(), req)
-			if err != nil {
-				return fmt.Errorf("token exchange failed: %w", err)
-			}
-
-			// Print metadata to stderr
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintf(os.Stderr, "Token Type:  %s\n", resp.TokenType)
-			fmt.Fprintf(os.Stderr, "Issued Type: %s\n", resp.IssuedTokenType)
-			fmt.Fprintf(os.Stderr, "Expires In:  %s\n", time.Duration(resp.ExpiresIn)*time.Second)
-			fmt.Fprintln(os.Stderr)
 
 			// Decode and show JWT claims
-			claims, err := parseTokenClaims(resp.AccessToken)
+			claims, err := parseTokenClaims(accessToken)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to decode JWT: %v\n", err)
 			} else {
@@ -160,7 +199,7 @@ Examples:
 			fmt.Fprintln(os.Stderr)
 
 			// Print token to stdout
-			fmt.Println(resp.AccessToken)
+			fmt.Println(accessToken)
 
 			return nil
 		},

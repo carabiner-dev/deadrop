@@ -23,9 +23,9 @@ type TokenSource interface {
 
 // ExchangeSpec defines the parameters for a token exchange.
 type ExchangeSpec struct {
-	Audience []string
-	Scope    []string
-	Resource []string
+	Audience []string `json:"audience"`
+	Scope    []string `json:"scope,omitempty"`
+	Resource []string `json:"resource,omitempty"`
 }
 
 // managedToken holds the state for a single exchanged token.
