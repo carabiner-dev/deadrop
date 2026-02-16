@@ -116,6 +116,54 @@ func (c *Client) validateRequest(req *ExchangeRequest) error {
 	return nil
 }
 
+// RenewToken renews an existing Carabiner token.
+// The token must have been issued by the server and may be expired (within grace period).
+func (c *Client) RenewToken(ctx context.Context, token string) (*ExchangeResponse, error) {
+	if token == "" {
+		return nil, fmt.Errorf("token is required")
+	}
+
+	// Build form data
+	formData := url.Values{}
+	formData.Set("token", token)
+
+	// Create HTTP request
+	renewURL := c.ServerURL + "/renew"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", renewURL, strings.NewReader(formData.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	httpReq.Header.Set("Accept", "application/json")
+
+	// Send request
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("sending request to %s: %w", renewURL, err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	// Handle non-200 responses
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.handleRenewErrorResponse(resp.StatusCode, body)
+	}
+
+	// Parse successful response
+	var renewResp ExchangeResponse
+	if err := json.Unmarshal(body, &renewResp); err != nil {
+		return nil, fmt.Errorf("parsing response: %w", err)
+	}
+
+	return &renewResp, nil
+}
+
 // handleErrorResponse parses and formats error responses
 func (c *Client) handleErrorResponse(statusCode int, body []byte) error {
 	// Try to parse as OAuth error
@@ -127,4 +175,36 @@ func (c *Client) handleErrorResponse(statusCode int, body []byte) error {
 
 	// Fallback to generic error
 	return fmt.Errorf("token exchange failed (HTTP %d): %s", statusCode, string(body))
+}
+
+// handleRenewErrorResponse parses and formats renewal error responses
+func (c *Client) handleRenewErrorResponse(statusCode int, body []byte) error {
+	// Try to parse as OAuth error
+	var errorResp ErrorResponse
+	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error != "" {
+		// Check for token_expired error which means the token is too old to renew
+		if errorResp.Error == "token_expired" {
+			return &TokenExpiredError{
+				Message: errorResp.ErrorDescription,
+			}
+		}
+		return fmt.Errorf("token renewal failed (HTTP %d): %s - %s",
+			statusCode, errorResp.Error, errorResp.ErrorDescription)
+	}
+
+	// Fallback to generic error
+	return fmt.Errorf("token renewal failed (HTTP %d): %s", statusCode, string(body))
+}
+
+// TokenExpiredError is returned when a token is too old to be renewed.
+// The user must log in again.
+type TokenExpiredError struct {
+	Message string
+}
+
+func (e *TokenExpiredError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return "token is too old to renew, please log in again"
 }

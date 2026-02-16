@@ -4,6 +4,7 @@
 package credentials
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 )
 
 const (
@@ -283,8 +286,16 @@ func SaveIdentity(serverURL, token string) error {
 	return nil
 }
 
+// RenewalThreshold is the time before expiry when a token should be renewed.
+// If a token expires within this duration, it will be automatically renewed.
+const RenewalThreshold = 10 * time.Minute
+
+// ErrTokenExpired is returned when the token is expired and cannot be renewed.
+var ErrTokenExpired = fmt.Errorf("token is expired and cannot be renewed, please log in again")
+
 // LoadIdentity loads the identity token for a specific server.
 // Returns the token and its expiry time if valid.
+// This function does NOT perform auto-renewal. Use LoadIdentityWithRenewal for that.
 func LoadIdentity(serverURL string) (string, time.Time, error) {
 	identityPath, err := GetSessionIdentityPath(serverURL)
 	if err != nil {
@@ -308,10 +319,79 @@ func LoadIdentity(serverURL string) (string, time.Time, error) {
 	}
 
 	if time.Now().After(exp) {
-		return "", time.Time{}, fmt.Errorf("cached token is expired")
+		return "", time.Time{}, ErrTokenExpired
 	}
 
 	return token, exp, nil
+}
+
+// LoadIdentityWithRenewal loads the identity token for a specific server,
+// automatically renewing it if it's about to expire (within RenewalThreshold).
+// Returns the token, expiry time, and whether renewal was performed.
+func LoadIdentityWithRenewal(ctx context.Context, serverURL string) (string, time.Time, bool, error) {
+	identityPath, err := GetSessionIdentityPath(serverURL)
+	if err != nil {
+		return "", time.Time{}, false, err
+	}
+
+	data, err := os.ReadFile(identityPath)
+	if err != nil {
+		return "", time.Time{}, false, err
+	}
+
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", time.Time{}, false, fmt.Errorf("identity file is empty")
+	}
+
+	// Extract expiry
+	exp, err := extractExpiry(token)
+	if err != nil {
+		return "", time.Time{}, false, err
+	}
+
+	now := time.Now()
+
+	// If token is still valid and not near expiry, return it
+	if now.Before(exp) && time.Until(exp) > RenewalThreshold {
+		return token, exp, false, nil
+	}
+
+	// Token is expired or about to expire - try to renew
+	newToken, newExp, err := renewToken(ctx, serverURL, token)
+	if err != nil {
+		// If token is already expired and renewal failed, return error
+		if now.After(exp) {
+			return "", time.Time{}, false, ErrTokenExpired
+		}
+		// Token is still valid but renewal failed - return the old token
+		// This allows the user to continue working while renewal is retried later
+		return token, exp, false, nil
+	}
+
+	// Save the renewed token
+	if err := SaveIdentity(serverURL, newToken); err != nil {
+		// Renewal succeeded but save failed - return the new token anyway
+		// (it's valid, just won't be persisted)
+		return newToken, newExp, true, nil
+	}
+
+	return newToken, newExp, true, nil
+}
+
+// renewToken calls the deadrop server to renew a token.
+func renewToken(ctx context.Context, serverURL, token string) (string, time.Time, error) {
+	client := exchange.NewClient(serverURL)
+
+	resp, err := client.RenewToken(ctx, token)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	// Calculate expiry from response
+	exp := time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
+
+	return resp.AccessToken, exp, nil
 }
 
 // LoadDefaultIdentity loads the identity token from the default session.
