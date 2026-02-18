@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 )
 
 // createTestJWT creates a minimal JWT for testing with the given expiry.
@@ -121,7 +123,7 @@ func TestManagerRegister(t *testing.T) {
 	ctx := context.Background()
 
 	// Test successful registration
-	err = m.Register(ctx, "test-token", ExchangeSpec{
+	err = m.Register(ctx, "test-token", &exchange.ExchangeRequest{
 		Audience: []string{"https://api.example.com"},
 	})
 	if err != nil {
@@ -129,7 +131,7 @@ func TestManagerRegister(t *testing.T) {
 	}
 
 	// Test duplicate registration
-	err = m.Register(ctx, "test-token", ExchangeSpec{
+	err = m.Register(ctx, "test-token", &exchange.ExchangeRequest{
 		Audience: []string{"https://api.example.com"},
 	})
 	if err == nil {
@@ -137,7 +139,7 @@ func TestManagerRegister(t *testing.T) {
 	}
 
 	// Test empty id
-	err = m.Register(ctx, "", ExchangeSpec{
+	err = m.Register(ctx, "", &exchange.ExchangeRequest{
 		Audience: []string{"https://api.example.com"},
 	})
 	if err == nil {
@@ -145,7 +147,7 @@ func TestManagerRegister(t *testing.T) {
 	}
 
 	// Test empty audience
-	err = m.Register(ctx, "another-token", ExchangeSpec{})
+	err = m.Register(ctx, "another-token", &exchange.ExchangeRequest{})
 	if err == nil {
 		t.Error("Register() expected error for empty audience, got nil")
 	}
@@ -174,7 +176,7 @@ func TestManagerToken(t *testing.T) {
 	ctx := context.Background()
 
 	// Register a token
-	err = m.Register(ctx, "api-token", ExchangeSpec{
+	err = m.Register(ctx, "api-token", &exchange.ExchangeRequest{
 		Audience: []string{"https://api.example.com"},
 		Scope:    []string{"read", "write"},
 	})
@@ -221,7 +223,7 @@ func TestManagerTokenSource(t *testing.T) {
 	ctx := context.Background()
 
 	// Register a token
-	err = m.Register(ctx, "api-token", ExchangeSpec{
+	err = m.Register(ctx, "api-token", &exchange.ExchangeRequest{
 		Audience: []string{"https://api.example.com"},
 	})
 	if err != nil {
@@ -280,7 +282,7 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	ctx := context.Background()
 
 	// Register a token
-	err = m.Register(ctx, "api-token", ExchangeSpec{
+	err = m.Register(ctx, "api-token", &exchange.ExchangeRequest{
 		Audience: []string{"https://api.example.com"},
 	})
 	if err != nil {
@@ -415,7 +417,7 @@ func TestCentralTokenCaching(t *testing.T) {
 
 	// Register multiple tokens
 	for i := 0; i < 3; i++ {
-		err = m.Register(ctx, fmt.Sprintf("token-%d", i), ExchangeSpec{
+		err = m.Register(ctx, fmt.Sprintf("token-%d", i), &exchange.ExchangeRequest{
 			Audience: []string{"https://api.example.com"},
 		})
 		if err != nil {

@@ -29,25 +29,26 @@ const (
 
 // CachedToken represents an exchanged token stored on disk.
 type CachedToken struct {
-	Token     string       `json:"token"`
-	ExpiresAt time.Time    `json:"expires_at"`
-	Spec      ExchangeSpec `json:"spec"`
+	Token     string                   `json:"token"`
+	ExpiresAt time.Time                `json:"expires_at"`
+	Spec      *exchange.ExchangeRequest `json:"spec"`
 }
 
-// HashExchangeSpec generates a deterministic hash for an exchange specification.
-// This is used to create unique filenames for cached tokens.
-func HashExchangeSpec(spec ExchangeSpec) string {
+// HashExchangeRequest generates a deterministic hash for an exchange request.
+// This is used to create unique filenames for cached tokens. Only the Audience,
+// Scope, and Resource fields are hashed.
+func HashExchangeRequest(req *exchange.ExchangeRequest) string {
 	// Sort all arrays for deterministic ordering
-	audience := make([]string, len(spec.Audience))
-	copy(audience, spec.Audience)
+	audience := make([]string, len(req.Audience))
+	copy(audience, req.Audience)
 	sort.Strings(audience)
 
-	scope := make([]string, len(spec.Scope))
-	copy(scope, spec.Scope)
+	scope := make([]string, len(req.Scope))
+	copy(scope, req.Scope)
 	sort.Strings(scope)
 
-	resource := make([]string, len(spec.Resource))
-	copy(resource, spec.Resource)
+	resource := make([]string, len(req.Resource))
+	copy(resource, req.Resource)
 	sort.Strings(resource)
 
 	// Build a canonical string representation
@@ -73,18 +74,18 @@ func GetTokensDir(serverURL string) (string, error) {
 }
 
 // getTokenFilePath returns the path to a specific token file.
-func getTokenFilePath(serverURL string, spec ExchangeSpec) (string, error) {
+func getTokenFilePath(serverURL string, req *exchange.ExchangeRequest) (string, error) {
 	tokensDir, err := GetTokensDir(serverURL)
 	if err != nil {
 		return "", err
 	}
-	hash := HashExchangeSpec(spec)
+	hash := HashExchangeRequest(req)
 	return filepath.Join(tokensDir, hash+".json"), nil
 }
 
 // SaveExchangedToken saves an exchanged token to the server's token cache.
-func SaveExchangedToken(serverURL string, spec ExchangeSpec, token string, expiresAt time.Time) error {
-	tokenPath, err := getTokenFilePath(serverURL, spec)
+func SaveExchangedToken(serverURL string, req *exchange.ExchangeRequest, token string, expiresAt time.Time) error {
+	tokenPath, err := getTokenFilePath(serverURL, req)
 	if err != nil {
 		return err
 	}
@@ -98,7 +99,7 @@ func SaveExchangedToken(serverURL string, spec ExchangeSpec, token string, expir
 	cached := &CachedToken{
 		Token:     token,
 		ExpiresAt: expiresAt,
-		Spec:      spec,
+		Spec:      req,
 	}
 
 	data, err := json.MarshalIndent(cached, "", "  ")
@@ -120,10 +121,10 @@ func SaveExchangedToken(serverURL string, spec ExchangeSpec, token string, expir
 	return nil
 }
 
-// LoadExchangedToken loads a cached exchanged token for a specific server and spec.
+// LoadExchangedToken loads a cached exchanged token for a specific server and request.
 // Returns the token and its expiry time if found and not expired.
-func LoadExchangedToken(serverURL string, spec ExchangeSpec) (string, time.Time, error) {
-	tokenPath, err := getTokenFilePath(serverURL, spec)
+func LoadExchangedToken(serverURL string, req *exchange.ExchangeRequest) (string, time.Time, error) {
+	tokenPath, err := getTokenFilePath(serverURL, req)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -154,13 +155,13 @@ func LoadExchangedToken(serverURL string, spec ExchangeSpec) (string, time.Time,
 // re-exchanging it if it's about to expire (within RenewalThreshold).
 // Returns the token, expiry time, whether renewal was performed, and any error.
 // This function opportunistically cleans up expired tokens with ~10% probability.
-func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, spec ExchangeSpec) (string, time.Time, bool, error) {
+func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, req *exchange.ExchangeRequest) (string, time.Time, bool, error) {
 	// Opportunistic cleanup (~10% of calls)
 	if rand.Intn(cleanupProbability) == 0 {
 		go CleanExpiredTokens(serverURL) //nolint:errcheck
 	}
 
-	tokenPath, err := getTokenFilePath(serverURL, spec)
+	tokenPath, err := getTokenFilePath(serverURL, req)
 	if err != nil {
 		return "", time.Time{}, false, err
 	}
@@ -169,7 +170,7 @@ func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, spec E
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No cached token - need to exchange
-			return exchangeAndCache(ctx, serverURL, spec)
+			return exchangeAndCache(ctx, serverURL, req)
 		}
 		return "", time.Time{}, false, fmt.Errorf("reading token file: %w", err)
 	}
@@ -178,7 +179,7 @@ func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, spec E
 	if err := json.Unmarshal(data, &cached); err != nil {
 		// Invalid cache file - remove and re-exchange
 		os.Remove(tokenPath) //nolint:errcheck
-		return exchangeAndCache(ctx, serverURL, spec)
+		return exchangeAndCache(ctx, serverURL, req)
 	}
 
 	now := time.Now()
@@ -195,7 +196,7 @@ func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, spec E
 	}
 
 	// Re-exchange
-	newToken, newExp, renewed, err := exchangeAndCache(ctx, serverURL, spec)
+	newToken, newExp, renewed, err := exchangeAndCache(ctx, serverURL, req)
 	if err != nil {
 		// If token is still valid but renewal failed, return the old token
 		if now.Before(cached.ExpiresAt) {
@@ -208,21 +209,21 @@ func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, spec E
 }
 
 // exchangeAndCache performs a token exchange and caches the result.
-func exchangeAndCache(ctx context.Context, serverURL string, spec ExchangeSpec) (string, time.Time, bool, error) {
+func exchangeAndCache(ctx context.Context, serverURL string, req *exchange.ExchangeRequest) (string, time.Time, bool, error) {
 	// First, load the identity token (with renewal if needed)
 	identityToken, _, _, err := LoadIdentityWithRenewal(ctx, serverURL)
 	if err != nil {
 		return "", time.Time{}, false, fmt.Errorf("loading identity token: %w", err)
 	}
 
-	// Perform the exchange
-	client := exchange.NewClient(serverURL)
-	resp, err := client.ExchangeToken(ctx, &exchange.ExchangeRequest{
+	// Perform the exchange with a fresh request to avoid mutating the caller's pointer
+	exchangeReq := &exchange.ExchangeRequest{
 		SubjectToken: identityToken,
-		Audience:     spec.Audience,
-		Scope:        spec.Scope,
-		Resource:     spec.Resource,
-	})
+		Audience:     req.Audience,
+		Scope:        req.Scope,
+		Resource:     req.Resource,
+	}
+	resp, err := exchange.NewClient(serverURL).ExchangeToken(ctx, exchangeReq)
 	if err != nil {
 		return "", time.Time{}, false, fmt.Errorf("exchanging token: %w", err)
 	}
@@ -231,7 +232,7 @@ func exchangeAndCache(ctx context.Context, serverURL string, spec ExchangeSpec) 
 	expiresAt := time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
 
 	// Cache the token
-	if err := SaveExchangedToken(serverURL, spec, resp.AccessToken, expiresAt); err != nil {
+	if err := SaveExchangedToken(serverURL, req, resp.AccessToken, expiresAt); err != nil {
 		// Log but don't fail - we still have a valid token
 		// The token just won't be cached for next time
 	}
@@ -240,8 +241,8 @@ func exchangeAndCache(ctx context.Context, serverURL string, spec ExchangeSpec) 
 }
 
 // DeleteExchangedToken removes a specific cached token.
-func DeleteExchangedToken(serverURL string, spec ExchangeSpec) error {
-	tokenPath, err := getTokenFilePath(serverURL, spec)
+func DeleteExchangedToken(serverURL string, req *exchange.ExchangeRequest) error {
+	tokenPath, err := getTokenFilePath(serverURL, req)
 	if err != nil {
 		return err
 	}
@@ -331,25 +332,25 @@ func CleanAllExpiredTokens() (int, error) {
 //	}
 //	// Use token...
 func GetToken(ctx context.Context, audience ...string) (string, error) {
-	return GetTokenWithOptions(ctx, ExchangeSpec{Audience: audience})
+	return GetTokenWithOptions(ctx, &exchange.ExchangeRequest{Audience: audience})
 }
 
 // GetTokenWithOptions is like GetToken but allows specifying full exchange options.
 //
 // Example usage:
 //
-//	token, err := credentials.GetTokenWithOptions(ctx, credentials.ExchangeSpec{
+//	token, err := credentials.GetTokenWithOptions(ctx, &exchange.ExchangeRequest{
 //	    Audience: []string{"https://api.example.com"},
 //	    Scope:    []string{"read", "write"},
 //	})
-func GetTokenWithOptions(ctx context.Context, spec ExchangeSpec) (string, error) {
+func GetTokenWithOptions(ctx context.Context, req *exchange.ExchangeRequest) (string, error) {
 	// Get the default session to find the server URL
 	_, serverURL, err := GetDefaultSession()
 	if err != nil {
 		return "", fmt.Errorf("no default session configured (run 'carabiner login' first): %w", err)
 	}
 
-	token, _, _, err := LoadExchangedTokenWithRenewal(ctx, serverURL, spec)
+	token, _, _, err := LoadExchangedTokenWithRenewal(ctx, serverURL, req)
 	if err != nil {
 		return "", err
 	}
@@ -359,12 +360,12 @@ func GetTokenWithOptions(ctx context.Context, spec ExchangeSpec) (string, error)
 
 // GetTokenForServer is like GetToken but allows specifying a specific server.
 func GetTokenForServer(ctx context.Context, serverURL string, audience ...string) (string, error) {
-	return GetTokenForServerWithOptions(ctx, serverURL, ExchangeSpec{Audience: audience})
+	return GetTokenForServerWithOptions(ctx, serverURL, &exchange.ExchangeRequest{Audience: audience})
 }
 
 // GetTokenForServerWithOptions is like GetTokenWithOptions but allows specifying a specific server.
-func GetTokenForServerWithOptions(ctx context.Context, serverURL string, spec ExchangeSpec) (string, error) {
-	token, _, _, err := LoadExchangedTokenWithRenewal(ctx, serverURL, spec)
+func GetTokenForServerWithOptions(ctx context.Context, serverURL string, req *exchange.ExchangeRequest) (string, error) {
+	token, _, _, err := LoadExchangedTokenWithRenewal(ctx, serverURL, req)
 	if err != nil {
 		return "", err
 	}

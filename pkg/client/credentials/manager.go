@@ -21,20 +21,13 @@ type TokenSource interface {
 	Token(ctx context.Context) (string, error)
 }
 
-// ExchangeSpec defines the parameters for a token exchange.
-type ExchangeSpec struct {
-	Audience []string `json:"audience"`
-	Scope    []string `json:"scope,omitempty"`
-	Resource []string `json:"resource,omitempty"`
-}
-
 // managedToken holds the state for a single exchanged token.
 type managedToken struct {
 	mu sync.RWMutex
 	// Token data
 	token      string
 	expiresAt  time.Time
-	spec       ExchangeSpec
+	request    *exchange.ExchangeRequest
 	refreshing bool
 	lastError  error
 }
@@ -144,15 +137,14 @@ func NewManager(ctx context.Context, opts ...Option) (*Manager, error) {
 	return m, nil
 }
 
-// Register adds a new exchange specification struct and immediately calls its
-// endpoint to exchange a token.
+// Register adds a new exchange request and immediately exchanges a token.
 //
 // The id is used to retrieve the token later via Token() or TokenSource().
-func (m *Manager) Register(ctx context.Context, id string, spec ExchangeSpec) error {
+func (m *Manager) Register(ctx context.Context, id string, req *exchange.ExchangeRequest) error {
 	if id == "" {
 		return errors.New("token id is required")
 	}
-	if len(spec.Audience) == 0 {
+	if len(req.Audience) == 0 {
 		return errors.New("at least one audience is required")
 	}
 
@@ -163,7 +155,7 @@ func (m *Manager) Register(ctx context.Context, id string, spec ExchangeSpec) er
 	}
 
 	mt := &managedToken{
-		spec: spec,
+		request: req,
 	}
 	m.tokens[id] = mt
 	m.mu.Unlock()
@@ -422,7 +414,7 @@ func (m *Manager) refreshToken(ctx context.Context, id string, mt *managedToken)
 		return err
 	}
 	mt.refreshing = true
-	spec := mt.spec
+	request := mt.request
 	mt.mu.Unlock()
 
 	defer func() {
@@ -442,9 +434,9 @@ func (m *Manager) refreshToken(ctx context.Context, id string, mt *managedToken)
 
 	req := &exchange.ExchangeRequest{
 		SubjectToken: centralToken,
-		Audience:     spec.Audience,
-		Scope:        spec.Scope,
-		Resource:     spec.Resource,
+		Audience:     request.Audience,
+		Scope:        request.Scope,
+		Resource:     request.Resource,
 	}
 
 	var lastErr error

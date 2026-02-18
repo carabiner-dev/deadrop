@@ -112,13 +112,13 @@ Examples:
 
 			// If caching is enabled and no explicit token source, use the credentials cache
 			if opts.Cache && opts.TokenPath == "" && !hasStdinData() {
-				spec := credentials.ExchangeSpec{
+				req := &exchange.ExchangeRequest{
 					Audience: opts.Audience,
 					Scope:    opts.Scope,
 					Resource: opts.Resource,
 				}
 
-				token, exp, exchanged, err := credentials.LoadExchangedTokenWithRenewal(ctx, opts.Server, spec)
+				token, exp, exchanged, err := credentials.LoadExchangedTokenWithRenewal(ctx, opts.Server, req)
 				if err != nil {
 					return fmt.Errorf("getting cached token: %w", err)
 				}
