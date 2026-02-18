@@ -22,6 +22,9 @@ const (
 
 	// DefaultConfigDir is the subdirectory under os.UserConfigDir for carabiner config.
 	DefaultConfigDir = "carabiner"
+
+	// DefaultExchangeServer is the default deadrop exchange server URL.
+	DefaultExchangeServer = "https://auth.carabiner.dev"
 )
 
 // StaticTokenSource returns a fixed token. Useful for testing.
@@ -176,4 +179,18 @@ func DefaultTokenSource() (TokenSource, error) {
 		DefaultEnvTokenSource(),
 		fileSource,
 	), nil
+}
+
+// ResolveExchangeServer returns the exchange server URL to use. If override
+// is non-empty it is returned directly. Otherwise the server URL from the
+// default session is used. If no session exists, DefaultExchangeServer is
+// returned.
+func ResolveExchangeServer(override string) string {
+	if override != "" {
+		return override
+	}
+	if _, url, err := GetDefaultSession(); err == nil {
+		return url
+	}
+	return DefaultExchangeServer
 }
