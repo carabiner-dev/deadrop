@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
+	"github.com/chainguard-dev/clog"
 )
 
 // ServiceTokenSourceOption configures a ServiceTokenSource.
@@ -145,7 +146,9 @@ func (s *ServiceTokenSource) Token(ctx context.Context) (string, error) {
 
 	// If we have a valid in-memory token
 	if token != "" && now.Before(expiresAt) {
+		clog.FromContext(ctx).Debug("Using cached token from memory", "expires_in", time.Until(expiresAt).Round(time.Second))
 		if shouldRefresh(now, issuedAt, expiresAt, s.refreshBuffer) && !refreshing {
+			clog.FromContext(ctx).Debug("Token near expiry, triggering background refresh")
 			go s.backgroundRefresh()
 		}
 		return token, nil
@@ -161,10 +164,13 @@ func (s *ServiceTokenSource) Token(ctx context.Context) (string, error) {
 			s.issuedAt = iat
 			s.mu.Unlock()
 
+			clog.FromContext(ctx).Debug("Using cached token from disk", "expires_in", time.Until(exp).Round(time.Second))
+
 			if !shouldRefresh(now, iat, exp, s.refreshBuffer) {
 				return t, nil
 			}
 			// Loaded but needs refresh - trigger background and return current
+			clog.FromContext(ctx).Debug("Token near expiry, triggering background refresh")
 			go s.backgroundRefresh()
 			return t, nil
 		}
@@ -297,6 +303,10 @@ func (s *ServiceTokenSource) doExchange(ctx context.Context) (token string, issu
 		Resource:     s.request.Resource,
 	}
 
+	// Debug log to track actual exchange requests
+	clog.FromContext(ctx).Debug("Sending token exchange request",
+		"server", s.serverURL, "audience", req.Audience, "resources", req.Resource)
+
 	resp, err := s.client.ExchangeToken(ctx, req)
 	if err != nil {
 		return "", time.Time{}, time.Time{}, fmt.Errorf("exchanging token: %w", err)
@@ -304,6 +314,9 @@ func (s *ServiceTokenSource) doExchange(ctx context.Context) (token string, issu
 
 	now := time.Now()
 	expiresAt = now.Add(time.Duration(resp.ExpiresIn) * time.Second)
+
+	clog.FromContext(ctx).Debug("Token exchange successful", "expires_in_seconds", resp.ExpiresIn)
+
 	return resp.AccessToken, now, expiresAt, nil
 }
 
