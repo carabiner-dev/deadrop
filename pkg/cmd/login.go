@@ -25,28 +25,26 @@ var _ command.OptionsSet = (*LoginOptions)(nil)
 
 type LoginOptions struct {
 	ServerOptions
-	LoginURL   string
-	PrintToken bool
-	Force      bool
+	LoginOpts
 }
 
 var defaultLoginOptions = LoginOptions{
-	PrintToken: false,
+	ServerOptions: defaultServerOptions,
+	LoginOpts:     defaultLoginOpts,
 }
 
 // Validate the options set
 func (lo *LoginOptions) Validate() error {
 	var errs = []error{
 		lo.ServerOptions.Validate(),
+		lo.LoginOpts.Validate(),
 	}
 	return errors.Join(errs...)
 }
 
 func (lo *LoginOptions) AddFlags(cmd *cobra.Command) {
 	lo.ServerOptions.AddFlags(cmd)
-	cmd.PersistentFlags().StringVar(&lo.LoginURL, "login-url", "", "Login service URL (default: https://login.carabiner.dev)")
-	cmd.PersistentFlags().BoolVar(&lo.PrintToken, "print", defaultLoginOptions.PrintToken, "Print the token to stdout")
-	cmd.PersistentFlags().BoolVar(&lo.Force, "force", false, "Force new login (ignore cached token)")
+	lo.LoginOpts.AddFlags(cmd)
 }
 
 func (lo *LoginOptions) Config() *command.OptionsSetConfig {

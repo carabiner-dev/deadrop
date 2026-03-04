@@ -12,39 +12,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewOptions(t *testing.T) {
+func TestNewServerOptions(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
-		opts := NewOptions()
+		opts := NewServerOptions()
 
 		assert.Equal(t, DefaultServer, opts.Server)
-		assert.Equal(t, DefaultLoginURL, opts.LoginURL)
 		assert.Empty(t, opts.Prefix)
 		assert.Empty(t, opts.Audience)
 	})
 
 	t.Run("with prefix", func(t *testing.T) {
-		opts := NewOptions(WithPrefix("deadrop"))
+		opts := NewServerOptions(WithPrefix("deadrop"))
 
 		assert.Equal(t, DefaultServer, opts.Server)
-		assert.Equal(t, DefaultLoginURL, opts.LoginURL)
 		assert.Equal(t, "deadrop", opts.Prefix)
 	})
 
 	t.Run("with audience", func(t *testing.T) {
-		opts := NewOptions(WithAudience("https://api.example.com"))
+		opts := NewServerOptions(WithAudience("https://api.example.com"))
 
 		assert.Equal(t, DefaultServer, opts.Server)
 		assert.Equal(t, []string{"https://api.example.com"}, opts.Audience)
 	})
 
 	t.Run("with multiple audiences", func(t *testing.T) {
-		opts := NewOptions(WithAudience("https://api1.example.com", "https://api2.example.com"))
+		opts := NewServerOptions(WithAudience("https://api1.example.com", "https://api2.example.com"))
 
 		assert.Equal(t, []string{"https://api1.example.com", "https://api2.example.com"}, opts.Audience)
 	})
 
 	t.Run("with prefix and audience", func(t *testing.T) {
-		opts := NewOptions(
+		opts := NewServerOptions(
 			WithPrefix("deadrop"),
 			WithAudience("https://api.example.com"),
 		)
@@ -54,33 +52,33 @@ func TestNewOptions(t *testing.T) {
 	})
 
 	t.Run("with disable persistence", func(t *testing.T) {
-		opts := NewOptions(WithDisablePersistence())
+		opts := NewServerOptions(WithDisablePersistence())
 
 		assert.True(t, opts.DisablePersistence)
 	})
 }
 
-func TestOptions_Validate(t *testing.T) {
+func TestServerOptions_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
-		opts    *Options
+		opts    *ServerOptions
 		wantErr bool
 	}{
 		{
 			name:    "valid with defaults",
-			opts:    NewOptions(),
+			opts:    NewServerOptions(),
 			wantErr: false,
 		},
 		{
 			name: "valid with custom server",
-			opts: &Options{
+			opts: &ServerOptions{
 				Server: "https://custom.example.com",
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid empty server",
-			opts: &Options{
+			opts: &ServerOptions{
 				Server: "",
 			},
 			wantErr: true,
@@ -99,19 +97,18 @@ func TestOptions_Validate(t *testing.T) {
 	}
 }
 
-func TestOptions_Config(t *testing.T) {
+func TestServerOptions_Config(t *testing.T) {
 	t.Run("without prefix", func(t *testing.T) {
-		opts := NewOptions()
+		opts := NewServerOptions()
 		cfg := opts.Config()
 
 		require.NotNil(t, cfg)
 		assert.Empty(t, cfg.FlagPrefix)
 		assert.Contains(t, cfg.Flags, "server")
-		assert.Contains(t, cfg.Flags, "login-url")
 	})
 
 	t.Run("with prefix", func(t *testing.T) {
-		opts := NewOptions(WithPrefix("auth"))
+		opts := NewServerOptions(WithPrefix("auth"))
 		cfg := opts.Config()
 
 		require.NotNil(t, cfg)
@@ -119,13 +116,12 @@ func TestOptions_Config(t *testing.T) {
 
 		// LongFlag should return prefixed flag name
 		assert.Equal(t, "auth-server", cfg.LongFlag("server"))
-		assert.Equal(t, "auth-login-url", cfg.LongFlag("login-url"))
 	})
 }
 
-func TestOptions_AddFlags(t *testing.T) {
+func TestServerOptions_AddFlags(t *testing.T) {
 	t.Run("without prefix", func(t *testing.T) {
-		opts := NewOptions()
+		opts := NewServerOptions()
 		cmd := &cobra.Command{}
 
 		opts.AddFlags(cmd)
@@ -133,14 +129,10 @@ func TestOptions_AddFlags(t *testing.T) {
 		serverFlag := cmd.PersistentFlags().Lookup("server")
 		require.NotNil(t, serverFlag)
 		assert.Equal(t, DefaultServer, serverFlag.DefValue)
-
-		loginURLFlag := cmd.PersistentFlags().Lookup("login-url")
-		require.NotNil(t, loginURLFlag)
-		assert.Equal(t, DefaultLoginURL, loginURLFlag.DefValue)
 	})
 
 	t.Run("with prefix", func(t *testing.T) {
-		opts := NewOptions(WithPrefix("auth"))
+		opts := NewServerOptions(WithPrefix("auth"))
 		cmd := &cobra.Command{}
 
 		opts.AddFlags(cmd)
@@ -149,23 +141,19 @@ func TestOptions_AddFlags(t *testing.T) {
 		serverFlag := cmd.PersistentFlags().Lookup("auth-server")
 		require.NotNil(t, serverFlag)
 		assert.Equal(t, DefaultServer, serverFlag.DefValue)
-
-		loginURLFlag := cmd.PersistentFlags().Lookup("auth-login-url")
-		require.NotNil(t, loginURLFlag)
-		assert.Equal(t, DefaultLoginURL, loginURLFlag.DefValue)
 	})
 }
 
-func TestOptions_TokenSource(t *testing.T) {
+func TestServerOptions_TokenSource(t *testing.T) {
 	t.Run("requires audience", func(t *testing.T) {
-		opts := NewOptions()
+		opts := NewServerOptions()
 		_, err := opts.TokenSource(t.Context())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "audience")
 	})
 
 	t.Run("uses preloaded audience", func(t *testing.T) {
-		opts := NewOptions(WithAudience("https://api.example.com"))
+		opts := NewServerOptions(WithAudience("https://api.example.com"))
 		// This should successfully create a TokenSource (audience is preloaded)
 		source, err := opts.TokenSource(t.Context())
 		assert.NoError(t, err)
@@ -173,7 +161,7 @@ func TestOptions_TokenSource(t *testing.T) {
 	})
 
 	t.Run("override preloaded audience", func(t *testing.T) {
-		opts := NewOptions(WithAudience("https://preloaded.example.com"))
+		opts := NewServerOptions(WithAudience("https://preloaded.example.com"))
 		// Passing audience should override the preloaded one
 		source, err := opts.TokenSource(t.Context(), "https://override.example.com")
 		assert.NoError(t, err)
@@ -181,23 +169,23 @@ func TestOptions_TokenSource(t *testing.T) {
 	})
 
 	t.Run("validates options", func(t *testing.T) {
-		opts := &Options{Server: ""}
+		opts := &ServerOptions{Server: ""}
 		_, err := opts.TokenSource(t.Context(), "https://api.example.com")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid options")
 	})
 }
 
-func TestOptions_TokenSourceWithRequest(t *testing.T) {
+func TestServerOptions_TokenSourceWithRequest(t *testing.T) {
 	t.Run("requires request", func(t *testing.T) {
-		opts := NewOptions()
+		opts := NewServerOptions()
 		_, err := opts.TokenSourceWithRequest(t.Context(), nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "request is required")
 	})
 
 	t.Run("validates options", func(t *testing.T) {
-		opts := &Options{Server: ""}
+		opts := &ServerOptions{Server: ""}
 		_, err := opts.TokenSourceWithRequest(t.Context(), &exchange.ExchangeRequest{
 			Audience: []string{"https://api.example.com"},
 		})

@@ -4,33 +4,14 @@
 package cmd
 
 import (
-	"errors"
-
-	"github.com/carabiner-dev/command"
-	"github.com/spf13/cobra"
+	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 )
 
-var _ command.OptionsSet = (*ServerOptions)(nil)
+// ServerOptions is an alias for credentials.ServerOptions.
+type ServerOptions = credentials.ServerOptions
 
-var defaultServerOptions = ServerOptions{
-	Server: "https://auth.carabiner.dev",
-}
+// LoginOpts is an alias for credentials.LoginOptions.
+type LoginOpts = credentials.LoginOptions
 
-type ServerOptions struct {
-	Server string
-}
-
-func (eo *ServerOptions) Config() *command.OptionsSetConfig {
-	return nil
-}
-
-func (so *ServerOptions) Validate() error {
-	if so.Server == "" {
-		return errors.New("exchange server URL not set")
-	}
-	return nil
-}
-
-func (so *ServerOptions) AddFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVar(&so.Server, "server", defaultServerOptions.Server, "Deadrop exchange server URL")
-}
+var defaultServerOptions = *credentials.NewServerOptions()
+var defaultLoginOpts = *credentials.NewLoginOptions()

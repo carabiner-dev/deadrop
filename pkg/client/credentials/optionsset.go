@@ -14,11 +14,10 @@ import (
 )
 
 const (
-	flagServer   = "server"
-	flagLoginURL = "login-url"
+	flagServer = "server"
 )
 
-var _ command.OptionsSet = (*Options)(nil)
+var _ command.OptionsSet = (*ServerOptions)(nil)
 
 // DefaultServer is the default deadrop exchange server URL.
 const DefaultServer = "https://auth.carabiner.dev"
@@ -26,45 +25,45 @@ const DefaultServer = "https://auth.carabiner.dev"
 // DefaultLoginURL is the default login URL for the Carabiner login service.
 const DefaultLoginURL = "https://login.carabiner.dev"
 
-// OptionsOption is a functional option for configuring Options.
-type OptionsOption func(*Options)
+// ServerOptionsOption is a functional option for configuring ServerOptions.
+type ServerOptionsOption func(*ServerOptions)
 
 // WithPrefix sets the flag prefix for the options.
 // For example, WithPrefix("deadrop") results in flags like --deadrop-server.
-func WithPrefix(prefix string) OptionsOption {
-	return func(o *Options) {
+func WithPrefix(prefix string) ServerOptionsOption {
+	return func(o *ServerOptions) {
 		o.Prefix = prefix
 	}
 }
 
 // WithAudience sets the default audience for token exchange.
 // This can be overridden when calling TokenSource().
-func WithAudience(audience ...string) OptionsOption {
-	return func(o *Options) {
+func WithAudience(audience ...string) ServerOptionsOption {
+	return func(o *ServerOptions) {
 		o.Audience = audience
 	}
 }
 
 // WithDisablePersistence disables token caching to disk.
-func WithDisablePersistence() OptionsOption {
-	return func(o *Options) {
+func WithDisablePersistence() ServerOptionsOption {
+	return func(o *ServerOptions) {
 		o.DisablePersistence = true
 	}
 }
 
-// Options is an OptionsSet for configuring deadrop credentials in CLI tools.
-// It provides flags for the exchange server and login URL, and methods
-// to obtain TokenSource instances for specific audiences.
+// ServerOptions is an ServerOptionsSet for configuring deadrop credentials in CLI tools.
+// It provides the --server flag and methods to obtain TokenSource instances
+// for specific audiences.
 //
 // Example usage in a CLI tool:
 //
-//	type MyOptions struct {
-//	    credentials.Options
+//	type MyServerOptions struct {
+//	    credentials.ServerOptions
 //	    // other options...
 //	}
 //
-//	func (o *MyOptions) AddFlags(cmd *cobra.Command) {
-//	    o.Options.AddFlags(cmd)
+//	func (o *MyServerOptions) AddFlags(cmd *cobra.Command) {
+//	    o.ServerOptions.AddFlags(cmd)
 //	    // add other flags...
 //	}
 //
@@ -77,16 +76,13 @@ func WithDisablePersistence() OptionsOption {
 //
 // Example with prefix and audience:
 //
-//	opts := credentials.NewOptions(
+//	opts := credentials.NewServerOptions(
 //	    credentials.WithPrefix("deadrop"),
 //	    credentials.WithAudience("https://api.example.com"),
 //	)
-type Options struct {
+type ServerOptions struct {
 	// Server is the deadrop exchange server URL.
 	Server string
-
-	// LoginURL is the login service URL for interactive authentication.
-	LoginURL string
 
 	// Prefix is an optional prefix for flag names (e.g., "deadrop" -> "--deadrop-server").
 	Prefix string
@@ -98,26 +94,25 @@ type Options struct {
 	DisablePersistence bool
 }
 
-// NewOptions creates a new Options with default values.
+// NewServerOptions creates a new ServerOptions with default values.
 // Use functional options to customize the configuration.
 //
 // Examples:
 //
 //	// Default options
-//	opts := credentials.NewOptions()
+//	opts := credentials.NewServerOptions()
 //
 //	// With prefix
-//	opts := credentials.NewOptions(credentials.WithPrefix("deadrop"))
+//	opts := credentials.NewServerOptions(credentials.WithPrefix("deadrop"))
 //
 //	// With prefix and audience
-//	opts := credentials.NewOptions(
+//	opts := credentials.NewServerOptions(
 //	    credentials.WithPrefix("deadrop"),
 //	    credentials.WithAudience("https://api.example.com"),
 //	)
-func NewOptions(opts ...OptionsOption) *Options {
-	o := &Options{
-		Server:   DefaultServer,
-		LoginURL: DefaultLoginURL,
+func NewServerOptions(opts ...ServerOptionsOption) *ServerOptions {
+	o := &ServerOptions{
+		Server: DefaultServer,
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -126,7 +121,7 @@ func NewOptions(opts ...OptionsOption) *Options {
 }
 
 // Config returns the OptionsSetConfig for this options set.
-func (o *Options) Config() *command.OptionsSetConfig {
+func (o *ServerOptions) Config() *command.OptionsSetConfig {
 	return &command.OptionsSetConfig{
 		FlagPrefix: o.Prefix,
 		Flags: map[string]command.FlagConfig{
@@ -134,16 +129,12 @@ func (o *Options) Config() *command.OptionsSetConfig {
 				Long: "server",
 				Help: "Deadrop exchange server URL",
 			},
-			flagLoginURL: {
-				Long: "login-url",
-				Help: "Login service URL for interactive authentication",
-			},
 		},
 	}
 }
 
 // Validate validates the options.
-func (o *Options) Validate() error {
+func (o *ServerOptions) Validate() error {
 	if o.Server == "" {
 		return errors.New("deadrop server URL is required")
 	}
@@ -151,7 +142,7 @@ func (o *Options) Validate() error {
 }
 
 // AddFlags adds the deadrop credential flags to the command.
-func (o *Options) AddFlags(cmd *cobra.Command) {
+func (o *ServerOptions) AddFlags(cmd *cobra.Command) {
 	cfg := o.Config()
 
 	cmd.PersistentFlags().StringVar(
@@ -159,13 +150,6 @@ func (o *Options) AddFlags(cmd *cobra.Command) {
 		cfg.LongFlag(flagServer),
 		DefaultServer,
 		cfg.HelpText(flagServer),
-	)
-
-	cmd.PersistentFlags().StringVar(
-		&o.LoginURL,
-		cfg.LongFlag(flagLoginURL),
-		DefaultLoginURL,
-		cfg.HelpText(flagLoginURL),
 	)
 }
 
@@ -179,9 +163,9 @@ func (o *Options) AddFlags(cmd *cobra.Command) {
 //	source, err := opts.TokenSource(ctx, "https://api.example.com")
 //
 //	// Using preloaded audience from WithAudience()
-//	opts := credentials.NewOptions(credentials.WithAudience("https://api.example.com"))
+//	opts := credentials.NewServerOptions(credentials.WithAudience("https://api.example.com"))
 //	source, err := opts.TokenSource(ctx)
-func (o *Options) TokenSource(ctx context.Context, audience ...string) (TokenSource, error) {
+func (o *ServerOptions) TokenSource(ctx context.Context, audience ...string) (TokenSource, error) {
 	// Use provided audience, or fall back to preloaded audience
 	aud := audience
 	if len(aud) == 0 {
@@ -217,7 +201,7 @@ func (o *Options) TokenSource(ctx context.Context, audience ...string) (TokenSou
 //	    Audience: []string{"https://api.example.com"},
 //	    Scope:    []string{"read", "write"},
 //	})
-func (o *Options) TokenSourceWithRequest(ctx context.Context, req *exchange.ExchangeRequest) (TokenSource, error) {
+func (o *ServerOptions) TokenSourceWithRequest(ctx context.Context, req *exchange.ExchangeRequest) (TokenSource, error) {
 	if req == nil {
 		return nil, errors.New("exchange request is required")
 	}
@@ -249,7 +233,7 @@ func (o *Options) TokenSourceWithRequest(ctx context.Context, req *exchange.Exch
 //	    Audience: []string{"https://api.example.com"},
 //	})
 //	token, err := mgr.Token(ctx, "api")
-func (o *Options) Manager(ctx context.Context) (*Manager, error) {
+func (o *ServerOptions) Manager(ctx context.Context) (*Manager, error) {
 	if err := o.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid options: %w", err)
 	}
