@@ -60,7 +60,7 @@ func (a *ActionsTokenRetriever) GetToken(ctx context.Context) (string, error) {
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}

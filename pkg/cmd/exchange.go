@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/carabiner-dev/command"
+	"github.com/spf13/cobra"
 
 	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
-	"github.com/spf13/cobra"
 )
 
 var _ command.OptionsSet = (*ExchangeOptions)(nil)

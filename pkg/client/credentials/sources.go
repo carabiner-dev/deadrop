@@ -15,7 +15,7 @@ import (
 
 const (
 	// DefaultCredentialsEnvVar is the environment variable checked for credentials.
-	DefaultCredentialsEnvVar = "CARABINER_CREDENTIALS"
+	DefaultCredentialsEnvVar = "CARABINER_CREDENTIALS" //nolint:gosec // env var name, not a credential
 
 	// DefaultCredentialsFile is the filename for the default credentials file.
 	DefaultCredentialsFile = "identity.json"

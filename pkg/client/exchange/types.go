@@ -8,8 +8,8 @@ import (
 
 const (
 	// RFC 8693 constants
-	GrantTypeTokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange"
-	TokenTypeJWT           = "urn:ietf:params:oauth:token-type:jwt"
+	GrantTypeTokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange" //nolint:gosec // URN identifier, not a credential
+	TokenTypeJWT           = "urn:ietf:params:oauth:token-type:jwt"            //nolint:gosec // URN identifier, not a credential
 )
 
 // Type aliases for the proto types - exported for use by other packages

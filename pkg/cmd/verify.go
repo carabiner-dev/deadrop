@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
@@ -22,6 +23,12 @@ import (
 )
 
 // JWKS represents a JSON Web Key Set
+// JWK key types supported for signature verification
+const (
+	keyTypeRSA = "RSA"
+	keyTypeEC  = "EC"
+)
+
 type JWKS struct {
 	Keys []JWK `json:"keys"`
 }
@@ -53,7 +60,7 @@ type VerifyOptions struct {
 var defaultVerifyOptions = VerifyOptions{}
 
 func (vo *VerifyOptions) Validate() error {
-	var errs = []error{
+	errs := []error{
 		vo.TokenReadOptions.Validate(),
 	}
 	return errors.Join(errs...)
@@ -131,7 +138,7 @@ The token can be provided via --token flag or as the first argument.`,
 			var signatureError error
 
 			if !opts.SkipSignature && issuer != "" {
-				signatureValid, signatureError = verifySignature(tokendata, issuer)
+				signatureValid, signatureError = verifySignature(cmd.Context(), tokendata, issuer)
 			}
 
 			// Print header
@@ -209,7 +216,7 @@ The token can be provided via --token flag or as the first argument.`,
 				fmt.Println()
 				fmt.Println("Custom Claims:")
 				fmt.Println("──────────────")
-				customJSON, _ := json.MarshalIndent(customClaims, "  ", "  ")
+				customJSON, _ := json.MarshalIndent(customClaims, "  ", "  ") //nolint:errcheck,errchkjson // display only
 				fmt.Printf("  %s\n", string(customJSON))
 			}
 
@@ -268,11 +275,16 @@ The token can be provided via --token flag or as the first argument.`,
 }
 
 // verifySignature verifies the JWT signature using the issuer's JWKS endpoint
-func verifySignature(tokenString, issuer string) (bool, error) {
+func verifySignature(ctx context.Context, tokenString, issuer string) (bool, error) {
 	// Fetch JWKS from the issuer
 	jwksURL := issuer + "/.well-known/jwks.json"
 
-	resp, err := http.Get(jwksURL) //nolint:gosec
+	jwksReq, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("building JWKS request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(jwksReq)
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch JWKS from %s: %w", jwksURL, err)
 	}
@@ -324,13 +336,13 @@ func verifySignature(tokenString, issuer string) (bool, error) {
 	// Convert JWK to public key based on key type
 	var publicKey interface{}
 	switch matchingKey.Kty {
-	case "RSA":
+	case keyTypeRSA:
 		rsaKey, err := jwkToRSAPublicKey(matchingKey)
 		if err != nil {
 			return false, fmt.Errorf("failed to convert JWK to RSA public key: %w", err)
 		}
 		publicKey = rsaKey
-	case "EC":
+	case keyTypeEC:
 		ecKey, err := jwkToECDSAPublicKey(matchingKey)
 		if err != nil {
 			return false, fmt.Errorf("failed to convert JWK to ECDSA public key: %w", err)
@@ -344,18 +356,17 @@ func verifySignature(tokenString, issuer string) (bool, error) {
 	verifiedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Verify the signing method matches the key type
 		switch matchingKey.Kty {
-		case "RSA":
+		case keyTypeRSA:
 			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v (expected RSA)", token.Header["alg"])
 			}
-		case "EC":
+		case keyTypeEC:
 			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v (expected ECDSA)", token.Header["alg"])
 			}
 		}
 		return publicKey, nil
 	})
-
 	if err != nil {
 		return false, err
 	}
@@ -365,7 +376,7 @@ func verifySignature(tokenString, issuer string) (bool, error) {
 
 // jwkToRSAPublicKey converts a JWK to an RSA public key
 func jwkToRSAPublicKey(jwk *JWK) (*rsa.PublicKey, error) {
-	if jwk.Kty != "RSA" {
+	if jwk.Kty != keyTypeRSA {
 		return nil, fmt.Errorf("unsupported key type: %s (only RSA is supported)", jwk.Kty)
 	}
 

@@ -17,6 +17,12 @@ import (
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 )
 
+// Common URLs used across the package tests.
+const (
+	testAPIAudience = "https://api.example.com"
+	testAuthServer  = "https://auth.example.com"
+)
+
 // createTestJWT creates a minimal JWT for testing with the given expiry.
 func createTestJWT(exp time.Time) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
@@ -24,10 +30,28 @@ func createTestJWT(exp time.Time) string {
 		"exp": exp.Unix(),
 		"sub": "test-subject",
 	}
-	claimsJSON, _ := json.Marshal(claims)
+	claimsJSON, _ := json.Marshal(claims) //nolint:errcheck,errchkjson // static test data
 	payload := base64.RawURLEncoding.EncodeToString(claimsJSON)
 	signature := base64.RawURLEncoding.EncodeToString([]byte("test-signature"))
 	return header + "." + payload + "." + signature
+}
+
+// writeTestTokenResponse writes a standard token exchange response with a
+// token valid for one hour.
+func writeTestTokenResponse(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	now := time.Now()
+	lifetime := time.Hour
+	resp := map[string]interface{}{ //nolint:gosec // test token, not a credential
+		"access_token":      createTestJWTWithIat(now, now.Add(lifetime)),
+		"token_type":        "Bearer",
+		"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
+		"expires_in":        int64(lifetime.Seconds()),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		t.Errorf("encoding token response: %v", err)
+	}
 }
 
 func TestNewManager(t *testing.T) {
@@ -44,14 +68,14 @@ func TestNewManager(t *testing.T) {
 		{
 			name:        "valid token and server",
 			source:      NewStaticTokenSource(validToken),
-			server:      "https://auth.example.com",
+			server:      testAuthServer,
 			wantErr:     false,
 			errContains: "",
 		},
 		{
 			name:        "empty token",
 			source:      NewStaticTokenSource(""),
-			server:      "https://auth.example.com",
+			server:      testAuthServer,
 			wantErr:     true,
 			errContains: "static token is empty",
 		},
@@ -65,7 +89,7 @@ func TestNewManager(t *testing.T) {
 		{
 			name:        "expired token",
 			source:      NewStaticTokenSource(expiredToken),
-			server:      "https://auth.example.com",
+			server:      testAuthServer,
 			wantErr:     true,
 			errContains: "expired",
 		},
@@ -94,7 +118,7 @@ func TestNewManager(t *testing.T) {
 			if m == nil {
 				t.Error("NewManager() returned nil manager")
 			}
-			defer m.Close()
+			defer m.Close() //nolint:errcheck
 		})
 	}
 }
@@ -102,14 +126,7 @@ func TestNewManager(t *testing.T) {
 func TestManagerRegister(t *testing.T) {
 	// Create a mock server that returns valid tokens
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]interface{}{
-			"access_token":      createTestJWT(time.Now().Add(time.Hour)),
-			"token_type":        "Bearer",
-			"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-			"expires_in":        3600,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeTestTokenResponse(t, w)
 	}))
 	defer server.Close()
 
@@ -118,13 +135,13 @@ func TestManagerRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
 
 	// Test successful registration
 	err = m.Register(ctx, "test-token", &exchange.ExchangeRequest{
-		Audience: []string{"https://api.example.com"},
+		Audience: []string{testAPIAudience},
 	})
 	if err != nil {
 		t.Errorf("Register() error: %v", err)
@@ -132,7 +149,7 @@ func TestManagerRegister(t *testing.T) {
 
 	// Test duplicate registration
 	err = m.Register(ctx, "test-token", &exchange.ExchangeRequest{
-		Audience: []string{"https://api.example.com"},
+		Audience: []string{testAPIAudience},
 	})
 	if err == nil {
 		t.Error("Register() expected error for duplicate id, got nil")
@@ -140,7 +157,7 @@ func TestManagerRegister(t *testing.T) {
 
 	// Test empty id
 	err = m.Register(ctx, "", &exchange.ExchangeRequest{
-		Audience: []string{"https://api.example.com"},
+		Audience: []string{testAPIAudience},
 	})
 	if err == nil {
 		t.Error("Register() expected error for empty id, got nil")
@@ -155,14 +172,7 @@ func TestManagerRegister(t *testing.T) {
 
 func TestManagerToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]interface{}{
-			"access_token":      createTestJWT(time.Now().Add(time.Hour)),
-			"token_type":        "Bearer",
-			"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-			"expires_in":        3600,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeTestTokenResponse(t, w)
 	}))
 	defer server.Close()
 
@@ -171,13 +181,13 @@ func TestManagerToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
 
 	// Register a token
 	err = m.Register(ctx, "api-token", &exchange.ExchangeRequest{
-		Audience: []string{"https://api.example.com"},
+		Audience: []string{testAPIAudience},
 		Scope:    []string{"read", "write"},
 	})
 	if err != nil {
@@ -202,14 +212,7 @@ func TestManagerToken(t *testing.T) {
 
 func TestManagerTokenSource(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]interface{}{
-			"access_token":      createTestJWT(time.Now().Add(time.Hour)),
-			"token_type":        "Bearer",
-			"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-			"expires_in":        3600,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeTestTokenResponse(t, w)
 	}))
 	defer server.Close()
 
@@ -218,13 +221,13 @@ func TestManagerTokenSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
 
 	// Register a token
 	err = m.Register(ctx, "api-token", &exchange.ExchangeRequest{
-		Audience: []string{"https://api.example.com"},
+		Audience: []string{testAPIAudience},
 	})
 	if err != nil {
 		t.Fatalf("Register() error: %v", err)
@@ -261,14 +264,7 @@ func TestManagerConcurrentAccess(t *testing.T) {
 		requestCount++
 		mu.Unlock()
 
-		resp := map[string]interface{}{
-			"access_token":      createTestJWT(time.Now().Add(time.Hour)),
-			"token_type":        "Bearer",
-			"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-			"expires_in":        3600,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeTestTokenResponse(t, w)
 	}))
 	defer server.Close()
 
@@ -277,13 +273,13 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	ctx := context.Background()
 
 	// Register a token
 	err = m.Register(ctx, "api-token", &exchange.ExchangeRequest{
-		Audience: []string{"https://api.example.com"},
+		Audience: []string{testAPIAudience},
 	})
 	if err != nil {
 		t.Fatalf("Register() error: %v", err)
@@ -291,7 +287,7 @@ func TestManagerConcurrentAccess(t *testing.T) {
 
 	// Concurrent access
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -342,7 +338,7 @@ func TestOptions(t *testing.T) {
 
 	m, err := NewManager(context.Background(),
 		WithTokenSource(NewStaticTokenSource(validToken)),
-		WithServer("https://auth.example.com"),
+		WithServer(testAuthServer),
 		WithRefreshBuffer(0.3),
 		WithMaxRetries(10),
 		WithRetryInterval(2*time.Second),
@@ -350,7 +346,7 @@ func TestOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	if m.refreshBuffer != 0.3 {
 		t.Errorf("refreshBuffer = %v, want 0.3", m.refreshBuffer)
@@ -385,14 +381,7 @@ func (c *countingTokenSource) Count() int {
 
 func TestCentralTokenCaching(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]interface{}{
-			"access_token":      createTestJWT(time.Now().Add(time.Hour)),
-			"token_type":        "Bearer",
-			"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-			"expires_in":        3600,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeTestTokenResponse(t, w)
 	}))
 	defer server.Close()
 
@@ -406,7 +395,7 @@ func TestCentralTokenCaching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManager() error: %v", err)
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	// Initial read happens during NewManager
 	if count := countingSource.Count(); count != 1 {
@@ -416,9 +405,9 @@ func TestCentralTokenCaching(t *testing.T) {
 	ctx := context.Background()
 
 	// Register multiple tokens
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		err = m.Register(ctx, fmt.Sprintf("token-%d", i), &exchange.ExchangeRequest{
-			Audience: []string{"https://api.example.com"},
+			Audience: []string{testAPIAudience},
 		})
 		if err != nil {
 			t.Fatalf("Register() error: %v", err)
@@ -431,8 +420,8 @@ func TestCentralTokenCaching(t *testing.T) {
 	}
 
 	// Access tokens multiple times
-	for i := 0; i < 10; i++ {
-		for j := 0; j < 3; j++ {
+	for range 10 {
+		for j := range 3 {
 			_, err := m.Token(ctx, fmt.Sprintf("token-%d", j))
 			if err != nil {
 				t.Errorf("Token() error: %v", err)

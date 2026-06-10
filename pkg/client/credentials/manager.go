@@ -56,8 +56,9 @@ type Manager struct {
 	maxRetries int
 
 	retryInterval time.Duration // Initial retry interval (exponential backoff)
-	ctx           context.Context
-	cancel        context.CancelFunc
+	//nolint:containedctx // lifecycle context for background refresh goroutines, canceled in Close
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewManager creates a new credential manager.
@@ -187,7 +188,6 @@ func (m *Manager) Token(ctx context.Context, id string) (string, error) {
 	token := mt.token
 	expiresAt := mt.expiresAt
 	refreshing := mt.refreshing
-	lastError := mt.lastError
 	mt.mu.RUnlock()
 
 	now := time.Now()
@@ -221,7 +221,7 @@ func (m *Manager) Token(ctx context.Context, id string) (string, error) {
 
 	mt.mu.RLock()
 	token = mt.token
-	lastError = mt.lastError
+	lastError := mt.lastError
 	mt.mu.RUnlock()
 
 	if lastError != nil {
@@ -490,8 +490,9 @@ func (m *Manager) backgroundRefresh(id string, mt *managedToken) {
 	mt.refreshing = true
 	mt.mu.Unlock()
 
-	// Use the manager's context for background operations
-	_ = m.refreshToken(m.ctx, id, mt)
+	// Use the manager's context for background operations. Errors are
+	// stored in mt.lastError and surfaced on the next Token() call.
+	_ = m.refreshToken(m.ctx, id, mt) //nolint:errcheck
 }
 
 // waitForRefresh waits for an ongoing refresh to complete.
@@ -567,7 +568,7 @@ func extractExpiry(token string) (time.Time, error) {
 func splitJWT(token string) []string {
 	var parts []string
 	start := 0
-	for i := 0; i < len(token); i++ {
+	for i := range len(token) {
 		if token[i] == '.' {
 			parts = append(parts, token[start:i])
 			start = i + 1

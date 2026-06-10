@@ -16,9 +16,10 @@ import (
 	"time"
 
 	"github.com/carabiner-dev/command"
+	"github.com/spf13/cobra"
+
 	"github.com/carabiner-dev/deadrop/pkg/client/config"
 	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
-	"github.com/spf13/cobra"
 )
 
 var _ command.OptionsSet = (*LoginOptions)(nil)
@@ -35,7 +36,7 @@ var defaultLoginOptions = LoginOptions{
 
 // Validate the options set
 func (lo *LoginOptions) Validate() error {
-	var errs = []error{
+	errs := []error{
 		lo.ServerOptions.Validate(),
 		lo.LoginOpts.Validate(),
 	}
@@ -118,14 +119,18 @@ Examples:
 			}
 
 			// Start local callback server
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			listenConfig := net.ListenConfig{}
+			listener, err := listenConfig.Listen(ctx, "tcp", "127.0.0.1:0")
 			if err != nil {
 				return fmt.Errorf("starting callback server: %w", err)
 			}
-			defer listener.Close()
+			defer listener.Close() //nolint:errcheck
 
-			port := listener.Addr().(*net.TCPAddr).Port
-			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+			tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+			if !ok {
+				return fmt.Errorf("unexpected listener address type %T", listener.Addr())
+			}
+			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback", tcpAddr.Port)
 
 			// Channel to receive the token
 			tokenCh := make(chan string, 1)
@@ -133,6 +138,7 @@ Examples:
 
 			// Start HTTP server to receive the token
 			server := &http.Server{
+				ReadHeaderTimeout: 10 * time.Second,
 				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path != "/callback" {
 						http.NotFound(w, r)
@@ -150,6 +156,7 @@ Examples:
 					// Show success page to the user
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.WriteHeader(http.StatusOK)
+					//nolint:errcheck // best-effort response to the browser
 					fmt.Fprint(w, `<!DOCTYPE html>
 <html>
 <head>
@@ -191,7 +198,7 @@ Examples:
 			fmt.Fprintf(os.Stderr, "If the browser doesn't open, visit: %s\n", loginURL)
 
 			// Open browser
-			if err := openBrowser(loginURL); err != nil {
+			if err := openBrowser(ctx, loginURL); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not open browser: %v\n", err)
 			}
 
@@ -203,14 +210,14 @@ Examples:
 				// Shutdown the server
 				shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 				defer cancel()
-				server.Shutdown(shutdownCtx) //nolint:errcheck
+				server.Shutdown(shutdownCtx) //nolint:errcheck,gosec
 
 				// Save the token
 				if err := credentials.SaveIdentity(cfg.ServerURL, token); err != nil {
 					return fmt.Errorf("saving identity: %w", err)
 				}
 
-				identityPath, _ := credentials.GetSessionIdentityPath(cfg.ServerURL)
+				identityPath, _ := credentials.GetSessionIdentityPath(cfg.ServerURL) //nolint:errcheck // path is informational only
 				fmt.Fprintf(os.Stderr, "Authentication successful!\n")
 				fmt.Fprintf(os.Stderr, "Identity saved to %s\n", identityPath)
 
@@ -253,16 +260,16 @@ func buildLoginURL(baseURL, callbackURL string) (string, error) {
 }
 
 // openBrowser opens the default browser to the specified URL.
-func openBrowser(url string) error {
+func openBrowser(ctx context.Context, targetURL string) error {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(ctx, "open", targetURL) //nolint:gosec // URL comes from the configured login service
 	case "linux":
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(ctx, "xdg-open", targetURL) //nolint:gosec // URL comes from the configured login service
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", targetURL) //nolint:gosec // URL comes from the configured login service
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}

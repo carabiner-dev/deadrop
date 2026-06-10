@@ -5,16 +5,18 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/carabiner-dev/command"
-	"github.com/carabiner-dev/deadrop/pkg/client/config"
-	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/spf13/cobra"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/config"
+	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 )
 
 var _ command.OptionsSet = (*WhoamiOptions)(nil)
@@ -49,6 +51,7 @@ type TokenClaims struct {
 	ExpiresAt int64    `json:"exp,omitempty"`
 	IssuedAt  int64    `json:"iat,omitempty"`
 	Provider  string   `json:"provider,omitempty"`
+	Username  string   `json:"username,omitempty"`
 }
 
 func AddWhoami(parent *cobra.Command) {
@@ -102,7 +105,7 @@ Examples:
 			// Load the identity token with auto-renewal
 			token, exp, renewed, err := credentials.LoadIdentityWithRenewal(ctx, serverURL)
 			if err != nil {
-				if err == credentials.ErrTokenExpired {
+				if errors.Is(err, credentials.ErrTokenExpired) {
 					return fmt.Errorf("identity token has expired, please run 'carabiner login' to authenticate again")
 				}
 				return fmt.Errorf("no identity found for %s (run 'carabiner login' first): %w", serverURL, err)
@@ -139,6 +142,7 @@ Examples:
 			if claims.Subject != "" {
 				fmt.Printf("Subject:    %s\n", claims.Subject)
 			}
+			fmt.Printf("Username:   %s\n", claims.Username)
 			if claims.Email != "" {
 				fmt.Printf("Email:      %s\n", claims.Email)
 			}

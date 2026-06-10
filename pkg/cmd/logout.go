@@ -8,9 +8,10 @@ import (
 	"os"
 
 	"github.com/carabiner-dev/command"
+	"github.com/spf13/cobra"
+
 	"github.com/carabiner-dev/deadrop/pkg/client/config"
 	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
-	"github.com/spf13/cobra"
 )
 
 var _ command.OptionsSet = (*LogoutOptions)(nil)
@@ -101,7 +102,7 @@ Examples:
 				_, defaultServer, err := credentials.GetDefaultSession()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "No cached identities found")
-					return nil
+					return nil //nolint:nilerr // no cached identities means there is nothing to log out
 				}
 				serverURL = defaultServer
 			}

@@ -29,8 +29,8 @@ const (
 
 // CachedToken represents an exchanged token stored on disk.
 type CachedToken struct {
-	Token     string                   `json:"token"`
-	ExpiresAt time.Time                `json:"expires_at"`
+	Token     string                    `json:"token"`
+	ExpiresAt time.Time                 `json:"expires_at"`
 	Spec      *exchange.ExchangeRequest `json:"spec"`
 }
 
@@ -92,7 +92,7 @@ func SaveExchangedToken(serverURL string, req *exchange.ExchangeRequest, token s
 
 	// Ensure the tokens directory exists
 	tokensDir := filepath.Dir(tokenPath)
-	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+	if err := os.MkdirAll(tokensDir, 0o700); err != nil {
 		return fmt.Errorf("creating tokens directory: %w", err)
 	}
 
@@ -109,12 +109,12 @@ func SaveExchangedToken(serverURL string, req *exchange.ExchangeRequest, token s
 
 	// Atomic write
 	tempPath := tokenPath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0600); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("writing token file: %w", err)
 	}
 
 	if err := os.Rename(tempPath, tokenPath); err != nil {
-		os.Remove(tempPath) //nolint:errcheck
+		os.Remove(tempPath) //nolint:errcheck,gosec
 		return fmt.Errorf("renaming token file: %w", err)
 	}
 
@@ -144,7 +144,7 @@ func LoadExchangedToken(serverURL string, req *exchange.ExchangeRequest) (string
 
 	if time.Now().After(cached.ExpiresAt) {
 		// Token is expired - remove it and return error
-		os.Remove(tokenPath) //nolint:errcheck
+		os.Remove(tokenPath) //nolint:errcheck,gosec
 		return "", time.Time{}, fmt.Errorf("cached token is expired")
 	}
 
@@ -155,8 +155,9 @@ func LoadExchangedToken(serverURL string, req *exchange.ExchangeRequest) (string
 // re-exchanging it if it's about to expire (within RenewalThreshold).
 // Returns the token, expiry time, whether renewal was performed, and any error.
 // This function opportunistically cleans up expired tokens with ~10% probability.
-func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, req *exchange.ExchangeRequest) (string, time.Time, bool, error) {
+func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, req *exchange.ExchangeRequest) (token string, expiresAt time.Time, renewed bool, err error) {
 	// Opportunistic cleanup (~10% of calls)
+	//nolint:gosec // not used for crypto, just to randomize opportunistic cleanup
 	if rand.Intn(cleanupProbability) == 0 {
 		go CleanExpiredTokens(serverURL) //nolint:errcheck
 	}
@@ -178,7 +179,7 @@ func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, req *e
 	var cached CachedToken
 	if err := json.Unmarshal(data, &cached); err != nil {
 		// Invalid cache file - remove and re-exchange
-		os.Remove(tokenPath) //nolint:errcheck
+		os.Remove(tokenPath) //nolint:errcheck,gosec
 		return exchangeAndCache(ctx, serverURL, req)
 	}
 
@@ -192,11 +193,11 @@ func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, req *e
 	// Token is expired or about to expire - re-exchange
 	if now.After(cached.ExpiresAt) {
 		// Token is expired - must re-exchange
-		os.Remove(tokenPath) //nolint:errcheck
+		os.Remove(tokenPath) //nolint:errcheck,gosec
 	}
 
 	// Re-exchange
-	newToken, newExp, renewed, err := exchangeAndCache(ctx, serverURL, req)
+	newToken, newExp, didRenew, err := exchangeAndCache(ctx, serverURL, req)
 	if err != nil {
 		// If token is still valid but renewal failed, return the old token
 		if now.Before(cached.ExpiresAt) {
@@ -205,11 +206,11 @@ func LoadExchangedTokenWithRenewal(ctx context.Context, serverURL string, req *e
 		return "", time.Time{}, false, err
 	}
 
-	return newToken, newExp, renewed, nil
+	return newToken, newExp, didRenew, nil
 }
 
 // exchangeAndCache performs a token exchange and caches the result.
-func exchangeAndCache(ctx context.Context, serverURL string, req *exchange.ExchangeRequest) (string, time.Time, bool, error) {
+func exchangeAndCache(ctx context.Context, serverURL string, req *exchange.ExchangeRequest) (token string, expiresAt time.Time, renewed bool, err error) {
 	// First, load the identity token (with renewal if needed)
 	identityToken, _, _, err := LoadIdentityWithRenewal(ctx, serverURL)
 	if err != nil {
@@ -229,13 +230,11 @@ func exchangeAndCache(ctx context.Context, serverURL string, req *exchange.Excha
 	}
 
 	// Calculate expiry
-	expiresAt := time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
+	expiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
 
-	// Cache the token
-	if err := SaveExchangedToken(serverURL, req, resp.AccessToken, expiresAt); err != nil {
-		// Log but don't fail - we still have a valid token
-		// The token just won't be cached for next time
-	}
+	// Cache the token. Don't fail on error - we still have a valid token,
+	// it just won't be cached for next time.
+	_ = SaveExchangedToken(serverURL, req, resp.AccessToken, expiresAt) //nolint:errcheck
 
 	return resp.AccessToken, expiresAt, true, nil
 }
@@ -287,13 +286,13 @@ func CleanExpiredTokens(serverURL string) (int, error) {
 		var cached CachedToken
 		if err := json.Unmarshal(data, &cached); err != nil {
 			// Invalid file - remove it
-			os.Remove(tokenPath) //nolint:errcheck
+			os.Remove(tokenPath) //nolint:errcheck,gosec
 			removed++
 			continue
 		}
 
 		if now.After(cached.ExpiresAt) {
-			os.Remove(tokenPath) //nolint:errcheck
+			os.Remove(tokenPath) //nolint:errcheck,gosec
 			removed++
 		}
 	}

@@ -26,26 +26,18 @@ func createTestJWTWithIat(iat, exp time.Time) string {
 		"iat": iat.Unix(),
 		"sub": "test-subject",
 	}
-	claimsJSON, _ := json.Marshal(claims)
+	claimsJSON, _ := json.Marshal(claims) //nolint:errcheck,errchkjson // static test data
 	payload := base64.RawURLEncoding.EncodeToString(claimsJSON)
 	signature := base64.RawURLEncoding.EncodeToString([]byte("test-signature"))
 	return header + "." + payload + "." + signature
 }
 
 // newTestExchangeServer creates an httptest server that responds to /token
-// requests with a JWT having the given lifetime.
-func newTestExchangeServer(t *testing.T, lifetime time.Duration) *httptest.Server {
+// requests with a JWT valid for one hour.
+func newTestExchangeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		now := time.Now()
-		resp := map[string]any{
-			"access_token":      createTestJWTWithIat(now, now.Add(lifetime)),
-			"token_type":        "Bearer",
-			"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-			"expires_in":        int64(lifetime.Seconds()),
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+		writeTestTokenResponse(t, w)
 	}))
 }
 
@@ -54,8 +46,8 @@ func TestNewServiceTokenSource(t *testing.T) {
 
 	t.Run("valid request and server", func(t *testing.T) {
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
-			"https://auth.example.com",
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
+			testAuthServer,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
 		if err != nil {
@@ -69,7 +61,7 @@ func TestNewServiceTokenSource(t *testing.T) {
 	t.Run("nil request", func(t *testing.T) {
 		_, err := NewServiceTokenSource(
 			nil,
-			"https://auth.example.com",
+			testAuthServer,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
 		if err == nil {
@@ -80,7 +72,7 @@ func TestNewServiceTokenSource(t *testing.T) {
 	t.Run("empty audience", func(t *testing.T) {
 		_, err := NewServiceTokenSource(
 			&exchange.ExchangeRequest{},
-			"https://auth.example.com",
+			testAuthServer,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
 		if err == nil {
@@ -90,7 +82,7 @@ func TestNewServiceTokenSource(t *testing.T) {
 
 	t.Run("empty server URL", func(t *testing.T) {
 		_, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 			"",
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
@@ -105,8 +97,8 @@ func TestServiceTokenSourceOptions(t *testing.T) {
 
 	t.Run("custom refresh buffer", func(t *testing.T) {
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
-			"https://auth.example.com",
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
+			testAuthServer,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 			WithServiceRefreshBuffer(0.3),
 		)
@@ -120,8 +112,8 @@ func TestServiceTokenSourceOptions(t *testing.T) {
 
 	t.Run("invalid refresh buffer ignored", func(t *testing.T) {
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
-			"https://auth.example.com",
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
+			testAuthServer,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 			WithServiceRefreshBuffer(0.0),
 		)
@@ -135,8 +127,8 @@ func TestServiceTokenSourceOptions(t *testing.T) {
 
 	t.Run("persistence enabled", func(t *testing.T) {
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
-			"https://auth.example.com",
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
+			testAuthServer,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 			WithServicePersistence(),
 		)
@@ -150,8 +142,8 @@ func TestServiceTokenSourceOptions(t *testing.T) {
 
 	t.Run("nil identity source ignored", func(t *testing.T) {
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
-			"https://auth.example.com",
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
+			testAuthServer,
 			WithServiceIdentitySource(nil),
 		)
 		if err != nil {
@@ -166,14 +158,14 @@ func TestServiceTokenSourceOptions(t *testing.T) {
 
 func TestServiceTokenSourceToken(t *testing.T) {
 	identityToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	server := newTestExchangeServer(t, time.Hour)
+	server := newTestExchangeServer(t)
 	defer server.Close()
 
 	ctx := context.Background()
 
 	t.Run("first call exchanges token", func(t *testing.T) {
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 			server.URL,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
@@ -203,20 +195,12 @@ func TestServiceTokenSourceToken(t *testing.T) {
 			requestCount++
 			mu.Unlock()
 
-			now := time.Now()
-			resp := map[string]any{
-				"access_token":      createTestJWTWithIat(now, now.Add(time.Hour)),
-				"token_type":        "Bearer",
-				"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-				"expires_in":        3600,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp) //nolint:errcheck
+			writeTestTokenResponse(t, w)
 		}))
 		defer countServer.Close()
 
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 			countServer.URL,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
@@ -255,25 +239,17 @@ func TestServiceTokenSourceToken(t *testing.T) {
 		var receivedResource []string
 
 		specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r.ParseForm() //nolint:errcheck
+			r.ParseForm() //nolint:errcheck,gosec
 			receivedScope = r.FormValue("scope")
 			receivedResource = r.Form["resource"]
 
-			now := time.Now()
-			resp := map[string]any{
-				"access_token":      createTestJWTWithIat(now, now.Add(time.Hour)),
-				"token_type":        "Bearer",
-				"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-				"expires_in":        3600,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp) //nolint:errcheck
+			writeTestTokenResponse(t, w)
 		}))
 		defer specServer.Close()
 
 		source, err := NewServiceTokenSource(
 			&exchange.ExchangeRequest{
-				Audience: []string{"https://api.example.com"},
+				Audience: []string{testAPIAudience},
 				Scope:    []string{"read", "write"},
 				Resource: []string{"res1", "res2"},
 			},
@@ -300,7 +276,7 @@ func TestServiceTokenSourceToken(t *testing.T) {
 	t.Run("exchange failure returns error", func(t *testing.T) {
 		failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec
 				"error":             "server_error",
 				"error_description": "internal failure",
 			})
@@ -308,7 +284,7 @@ func TestServiceTokenSourceToken(t *testing.T) {
 		defer failServer.Close()
 
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 			failServer.URL,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
@@ -324,7 +300,7 @@ func TestServiceTokenSourceToken(t *testing.T) {
 
 	t.Run("identity source failure returns error", func(t *testing.T) {
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 			server.URL,
 			WithServiceIdentitySource(NewStaticTokenSource("")),
 		)
@@ -352,20 +328,12 @@ func TestServiceTokenSourceRefresh(t *testing.T) {
 			requestCount++
 			mu.Unlock()
 
-			now := time.Now()
-			resp := map[string]any{
-				"access_token":      createTestJWTWithIat(now, now.Add(time.Hour)),
-				"token_type":        "Bearer",
-				"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-				"expires_in":        3600,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp) //nolint:errcheck
+			writeTestTokenResponse(t, w)
 		}))
 		defer refreshServer.Close()
 
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 			refreshServer.URL,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
@@ -417,20 +385,12 @@ func TestServiceTokenSourceRefresh(t *testing.T) {
 			requestCount++
 			mu.Unlock()
 
-			now := time.Now()
-			resp := map[string]any{
-				"access_token":      createTestJWTWithIat(now, now.Add(time.Hour)),
-				"token_type":        "Bearer",
-				"issued_token_type": "urn:ietf:params:oauth:token-type:jwt",
-				"expires_in":        3600,
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp) //nolint:errcheck
+			writeTestTokenResponse(t, w)
 		}))
 		defer noRefreshServer.Close()
 
 		source, err := NewServiceTokenSource(
-			&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+			&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 			noRefreshServer.URL,
 			WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 		)
@@ -466,11 +426,11 @@ func TestServiceTokenSourceRefresh(t *testing.T) {
 
 func TestServiceTokenSourceConcurrent(t *testing.T) {
 	identityToken := createTestJWT(time.Now().Add(24 * time.Hour))
-	server := newTestExchangeServer(t, time.Hour)
+	server := newTestExchangeServer(t)
 	defer server.Close()
 
 	source, err := NewServiceTokenSource(
-		&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+		&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 		server.URL,
 		WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 	)
@@ -514,7 +474,7 @@ func TestServiceTokenSourcePersistence(t *testing.T) {
 	}
 
 	t.Run("saves token to disk when persistence enabled", func(t *testing.T) {
-		server := newTestExchangeServer(t, time.Hour)
+		server := newTestExchangeServer(t)
 		defer server.Close()
 
 		source, err := NewServiceTokenSource(
@@ -584,7 +544,7 @@ func TestServiceTokenSourcePersistence(t *testing.T) {
 	t.Run("does not persist without option", func(t *testing.T) {
 		req := &exchange.ExchangeRequest{Audience: []string{"https://api.no-persist.com"}}
 
-		server := newTestExchangeServer(t, time.Hour)
+		server := newTestExchangeServer(t)
 		defer server.Close()
 
 		source, err := NewServiceTokenSource(
@@ -603,7 +563,7 @@ func TestServiceTokenSourcePersistence(t *testing.T) {
 		}
 
 		// Verify no token was persisted
-		tokensDir, _ := GetTokensDir(serverURL)
+		tokensDir, _ := GetTokensDir(serverURL) //nolint:errcheck // missing dir means no token persisted
 		hash := HashExchangeRequest(req)
 		tokenPath := filepath.Join(tokensDir, hash+".json")
 		if _, err := os.Stat(tokenPath); err == nil {
@@ -622,7 +582,7 @@ func TestServiceTokenSourceContextCancellation(t *testing.T) {
 	defer slowServer.Close()
 
 	source, err := NewServiceTokenSource(
-		&exchange.ExchangeRequest{Audience: []string{"https://api.example.com"}},
+		&exchange.ExchangeRequest{Audience: []string{testAPIAudience}},
 		slowServer.URL,
 		WithServiceIdentitySource(NewStaticTokenSource(identityToken)),
 	)

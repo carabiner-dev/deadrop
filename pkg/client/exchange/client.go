@@ -60,7 +60,7 @@ func (c *Client) ExchangeToken(ctx context.Context, req *ExchangeRequest) (*Exch
 
 	// Create HTTP request
 	tokenURL := c.ServerURL + "/token"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(formData.Encode()))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(formData.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -129,7 +129,7 @@ func (c *Client) RenewToken(ctx context.Context, token string) (*ExchangeRespons
 
 	// Create HTTP request
 	renewURL := c.ServerURL + "/renew"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", renewURL, strings.NewReader(formData.Encode()))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, renewURL, strings.NewReader(formData.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

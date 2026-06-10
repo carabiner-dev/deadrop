@@ -12,8 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 	"github.com/chainguard-dev/clog"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 )
 
 // ServiceTokenSourceOption configures a ServiceTokenSource.
@@ -149,7 +150,7 @@ func (s *ServiceTokenSource) Token(ctx context.Context) (string, error) {
 		clog.FromContext(ctx).Debug("Using cached token from memory", "expires_in", time.Until(expiresAt).Round(time.Second))
 		if shouldRefresh(now, issuedAt, expiresAt, s.refreshBuffer) && !refreshing {
 			clog.FromContext(ctx).Debug("Token near expiry, triggering background refresh")
-			go s.backgroundRefresh()
+			go s.backgroundRefresh() //nolint:gosec,contextcheck // refresh must outlive the request context
 		}
 		return token, nil
 	}
@@ -171,7 +172,7 @@ func (s *ServiceTokenSource) Token(ctx context.Context) (string, error) {
 			}
 			// Loaded but needs refresh - trigger background and return current
 			clog.FromContext(ctx).Debug("Token near expiry, triggering background refresh")
-			go s.backgroundRefresh()
+			go s.backgroundRefresh() //nolint:gosec,contextcheck // refresh must outlive the request context
 			return t, nil
 		}
 	}
@@ -223,7 +224,8 @@ func (s *ServiceTokenSource) exchangeSync(ctx context.Context) (string, error) {
 	s.mu.Unlock()
 
 	if s.persist {
-		_ = SaveExchangedToken(s.serverURL, s.request, token, expiresAt)
+		// Best-effort cache write, the token is still valid if it fails
+		_ = SaveExchangedToken(s.serverURL, s.request, token, expiresAt) //nolint:errcheck
 	}
 
 	return token, nil
@@ -257,7 +259,8 @@ func (s *ServiceTokenSource) backgroundRefresh() {
 	s.mu.Unlock()
 
 	if s.persist {
-		_ = SaveExchangedToken(s.serverURL, s.request, token, expiresAt)
+		// Best-effort cache write, the token is still valid if it fails
+		_ = SaveExchangedToken(s.serverURL, s.request, token, expiresAt) //nolint:errcheck
 	}
 }
 
