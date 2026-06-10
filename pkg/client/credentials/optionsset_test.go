@@ -6,10 +6,11 @@ package credentials
 import (
 	"testing"
 
-	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 )
 
 func TestNewServerOptions(t *testing.T) {
@@ -29,10 +30,10 @@ func TestNewServerOptions(t *testing.T) {
 	})
 
 	t.Run("with audience", func(t *testing.T) {
-		opts := NewServerOptions(WithAudience("https://api.example.com"))
+		opts := NewServerOptions(WithAudience(testAPIAudience))
 
 		assert.Equal(t, DefaultServer, opts.Server)
-		assert.Equal(t, []string{"https://api.example.com"}, opts.Audience)
+		assert.Equal(t, []string{testAPIAudience}, opts.Audience)
 	})
 
 	t.Run("with multiple audiences", func(t *testing.T) {
@@ -44,11 +45,11 @@ func TestNewServerOptions(t *testing.T) {
 	t.Run("with prefix and audience", func(t *testing.T) {
 		opts := NewServerOptions(
 			WithPrefix("deadrop"),
-			WithAudience("https://api.example.com"),
+			WithAudience(testAPIAudience),
 		)
 
 		assert.Equal(t, "deadrop", opts.Prefix)
-		assert.Equal(t, []string{"https://api.example.com"}, opts.Audience)
+		assert.Equal(t, []string{testAPIAudience}, opts.Audience)
 	})
 
 	t.Run("with disable persistence", func(t *testing.T) {
@@ -89,9 +90,9 @@ func TestServerOptions_Validate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.opts.Validate()
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -148,15 +149,15 @@ func TestServerOptions_TokenSource(t *testing.T) {
 	t.Run("requires audience", func(t *testing.T) {
 		opts := NewServerOptions()
 		_, err := opts.TokenSource(t.Context())
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "audience")
 	})
 
 	t.Run("uses preloaded audience", func(t *testing.T) {
-		opts := NewServerOptions(WithAudience("https://api.example.com"))
+		opts := NewServerOptions(WithAudience(testAPIAudience))
 		// This should successfully create a TokenSource (audience is preloaded)
 		source, err := opts.TokenSource(t.Context())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, source)
 	})
 
@@ -164,14 +165,14 @@ func TestServerOptions_TokenSource(t *testing.T) {
 		opts := NewServerOptions(WithAudience("https://preloaded.example.com"))
 		// Passing audience should override the preloaded one
 		source, err := opts.TokenSource(t.Context(), "https://override.example.com")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.NotNil(t, source)
 	})
 
 	t.Run("validates options", func(t *testing.T) {
 		opts := &ServerOptions{Server: ""}
-		_, err := opts.TokenSource(t.Context(), "https://api.example.com")
-		assert.Error(t, err)
+		_, err := opts.TokenSource(t.Context(), testAPIAudience)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid options")
 	})
 }
@@ -180,16 +181,16 @@ func TestServerOptions_TokenSourceWithRequest(t *testing.T) {
 	t.Run("requires request", func(t *testing.T) {
 		opts := NewServerOptions()
 		_, err := opts.TokenSourceWithRequest(t.Context(), nil)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "request is required")
 	})
 
 	t.Run("validates options", func(t *testing.T) {
 		opts := &ServerOptions{Server: ""}
 		_, err := opts.TokenSourceWithRequest(t.Context(), &exchange.ExchangeRequest{
-			Audience: []string{"https://api.example.com"},
+			Audience: []string{testAPIAudience},
 		})
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid options")
 	})
 }

@@ -5,17 +5,19 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"time"
 
 	"github.com/carabiner-dev/command"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/spf13/cobra"
+
 	"github.com/carabiner-dev/deadrop/pkg/client/config"
 	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/spf13/cobra"
 )
 
 var _ command.OptionsSet = (*TokenOptions)(nil)
@@ -116,7 +118,7 @@ Examples:
 				var renewed bool
 				token, exp, renewed, err = credentials.LoadIdentityWithRenewal(ctx, serverURL)
 				if err != nil {
-					if err == credentials.ErrTokenExpired {
+					if errors.Is(err, credentials.ErrTokenExpired) {
 						return fmt.Errorf("identity token has expired, please run 'carabiner login' to authenticate again")
 					}
 					return fmt.Errorf("no identity found for %s (run 'carabiner login' first): %w", serverURL, err)
@@ -235,10 +237,10 @@ func printAllClaims(token string) error {
 			for i, item := range val {
 				strs[i] = fmt.Sprintf("%v", item)
 			}
-			jsonBytes, _ := json.Marshal(strs)
+			jsonBytes, _ := json.Marshal(strs) //nolint:errcheck,errchkjson // display only
 			fmt.Fprintf(os.Stderr, "  %s: %s\n", k, string(jsonBytes))
 		default:
-			jsonBytes, _ := json.Marshal(val)
+			jsonBytes, _ := json.Marshal(val) //nolint:errcheck,errchkjson // display only
 			fmt.Fprintf(os.Stderr, "  %s: %s\n", k, string(jsonBytes))
 		}
 	}

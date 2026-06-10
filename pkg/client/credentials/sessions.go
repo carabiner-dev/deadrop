@@ -92,7 +92,7 @@ func saveSessionsConfig(config *SessionsConfig) error {
 
 	// Ensure directory exists
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0700); err != nil {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
@@ -103,12 +103,12 @@ func saveSessionsConfig(config *SessionsConfig) error {
 
 	// Atomic write
 	tempPath := configPath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0600); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("writing sessions config: %w", err)
 	}
 
 	if err := os.Rename(tempPath, configPath); err != nil {
-		os.Remove(tempPath) //nolint:errcheck
+		os.Remove(tempPath) //nolint:errcheck,gosec
 		return fmt.Errorf("renaming sessions config: %w", err)
 	}
 
@@ -164,7 +164,7 @@ func GetOrCreateSession(serverURL string) (*SessionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(sessionDir, 0700); err != nil {
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating session directory: %w", err)
 	}
 
@@ -244,7 +244,7 @@ func SetDefaultSession(serverURL string) error {
 }
 
 // ListSessions returns all configured sessions
-func ListSessions() (map[string]*SessionInfo, string, error) {
+func ListSessions() (sessions map[string]*SessionInfo, defaultServer string, err error) {
 	config, err := LoadSessionsConfig()
 	if err != nil {
 		return nil, "", err
@@ -268,18 +268,18 @@ func SaveIdentity(serverURL, token string) error {
 
 	// Ensure the directory exists
 	identityDir := filepath.Dir(identityPath)
-	if err := os.MkdirAll(identityDir, 0700); err != nil {
+	if err := os.MkdirAll(identityDir, 0o700); err != nil {
 		return fmt.Errorf("creating session directory: %w", err)
 	}
 
 	// Write token atomically
 	tempPath := identityPath + ".tmp"
-	if err := os.WriteFile(tempPath, []byte(token+"\n"), 0600); err != nil {
+	if err := os.WriteFile(tempPath, []byte(token+"\n"), 0o600); err != nil { //nolint:gosec // path is derived from the user config dir
 		return fmt.Errorf("writing identity file: %w", err)
 	}
 
 	if err := os.Rename(tempPath, identityPath); err != nil {
-		os.Remove(tempPath) //nolint:errcheck
+		os.Remove(tempPath) //nolint:errcheck,gosec
 		return fmt.Errorf("renaming identity file: %w", err)
 	}
 
@@ -328,7 +328,7 @@ func LoadIdentity(serverURL string) (string, time.Time, error) {
 // LoadIdentityWithRenewal loads the identity token for a specific server,
 // automatically renewing it if it's about to expire (within RenewalThreshold).
 // Returns the token, expiry time, and whether renewal was performed.
-func LoadIdentityWithRenewal(ctx context.Context, serverURL string) (string, time.Time, bool, error) {
+func LoadIdentityWithRenewal(ctx context.Context, serverURL string) (token string, expiresAt time.Time, renewed bool, err error) {
 	identityPath, err := GetSessionIdentityPath(serverURL)
 	if err != nil {
 		return "", time.Time{}, false, err
@@ -339,7 +339,7 @@ func LoadIdentityWithRenewal(ctx context.Context, serverURL string) (string, tim
 		return "", time.Time{}, false, err
 	}
 
-	token := strings.TrimSpace(string(data))
+	token = strings.TrimSpace(string(data))
 	if token == "" {
 		return "", time.Time{}, false, fmt.Errorf("identity file is empty")
 	}
@@ -369,12 +369,9 @@ func LoadIdentityWithRenewal(ctx context.Context, serverURL string) (string, tim
 		return token, exp, false, nil
 	}
 
-	// Save the renewed token
-	if err := SaveIdentity(serverURL, newToken); err != nil {
-		// Renewal succeeded but save failed - return the new token anyway
-		// (it's valid, just won't be persisted)
-		return newToken, newExp, true, nil
-	}
+	// Save the renewed token. If saving fails, the renewed token is still
+	// valid, just not persisted, so return it anyway.
+	_ = SaveIdentity(serverURL, newToken) //nolint:errcheck
 
 	return newToken, newExp, true, nil
 }
@@ -459,4 +456,3 @@ func DeleteSession(serverURL string) error {
 
 	return saveSessionsConfig(config)
 }
-

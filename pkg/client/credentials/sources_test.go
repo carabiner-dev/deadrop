@@ -40,7 +40,7 @@ func TestFileTokenSource(t *testing.T) {
 		// Create temp file with token
 		tmpDir := t.TempDir()
 		tokenFile := filepath.Join(tmpDir, "token")
-		if err := os.WriteFile(tokenFile, []byte("file-token\n"), 0600); err != nil {
+		if err := os.WriteFile(tokenFile, []byte("file-token\n"), 0o600); err != nil {
 			t.Fatalf("WriteFile() error: %v", err)
 		}
 
@@ -57,7 +57,7 @@ func TestFileTokenSource(t *testing.T) {
 	t.Run("file with whitespace", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		tokenFile := filepath.Join(tmpDir, "token")
-		if err := os.WriteFile(tokenFile, []byte("  token-with-spaces  \n\n"), 0600); err != nil {
+		if err := os.WriteFile(tokenFile, []byte("  token-with-spaces  \n\n"), 0o600); err != nil {
 			t.Fatalf("WriteFile() error: %v", err)
 		}
 
@@ -82,7 +82,7 @@ func TestFileTokenSource(t *testing.T) {
 	t.Run("empty file", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		tokenFile := filepath.Join(tmpDir, "token")
-		if err := os.WriteFile(tokenFile, []byte(""), 0600); err != nil {
+		if err := os.WriteFile(tokenFile, []byte(""), 0o600); err != nil {
 			t.Fatalf("WriteFile() error: %v", err)
 		}
 
@@ -104,7 +104,7 @@ func TestFileTokenSource(t *testing.T) {
 	t.Run("token rotation", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		tokenFile := filepath.Join(tmpDir, "token")
-		if err := os.WriteFile(tokenFile, []byte("token-v1"), 0600); err != nil {
+		if err := os.WriteFile(tokenFile, []byte("token-v1"), 0o600); err != nil {
 			t.Fatalf("WriteFile() error: %v", err)
 		}
 
@@ -120,7 +120,7 @@ func TestFileTokenSource(t *testing.T) {
 		}
 
 		// Update file
-		if err := os.WriteFile(tokenFile, []byte("token-v2"), 0600); err != nil {
+		if err := os.WriteFile(tokenFile, []byte("token-v2"), 0o600); err != nil {
 			t.Fatalf("WriteFile() error: %v", err)
 		}
 
@@ -256,7 +256,7 @@ func TestDefaultFileTokenSource(t *testing.T) {
 			t.Fatalf("DefaultFileTokenSource() error: %v", err)
 		}
 		if source == nil {
-			t.Error("DefaultFileTokenSource() returned nil")
+			t.Fatal("DefaultFileTokenSource() returned nil")
 		}
 		// The path should contain the default config dir and file
 		if source.path == "" {

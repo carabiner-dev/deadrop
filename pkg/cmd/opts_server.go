@@ -13,5 +13,7 @@ type ServerOptions = credentials.ServerOptions
 // LoginOpts is an alias for credentials.LoginOptions.
 type LoginOpts = credentials.LoginOptions
 
-var defaultServerOptions = *credentials.NewServerOptions()
-var defaultLoginOpts = *credentials.NewLoginOptions()
+var (
+	defaultServerOptions = *credentials.NewServerOptions()
+	defaultLoginOpts     = *credentials.NewLoginOptions()
+)

@@ -5,16 +5,18 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/carabiner-dev/command"
-	"github.com/carabiner-dev/deadrop/pkg/client/config"
-	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/spf13/cobra"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/config"
+	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 )
 
 var _ command.OptionsSet = (*WhoamiOptions)(nil)
@@ -103,7 +105,7 @@ Examples:
 			// Load the identity token with auto-renewal
 			token, exp, renewed, err := credentials.LoadIdentityWithRenewal(ctx, serverURL)
 			if err != nil {
-				if err == credentials.ErrTokenExpired {
+				if errors.Is(err, credentials.ErrTokenExpired) {
 					return fmt.Errorf("identity token has expired, please run 'carabiner login' to authenticate again")
 				}
 				return fmt.Errorf("no identity found for %s (run 'carabiner login' first): %w", serverURL, err)

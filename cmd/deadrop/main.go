@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/carabiner-dev/deadrop/pkg/cmd"
 	"github.com/spf13/cobra"
+
+	"github.com/carabiner-dev/deadrop/pkg/cmd"
 )
 
 var version = "dev" // Set via ldflags during build

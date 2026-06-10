@@ -5,14 +5,16 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/carabiner-dev/command"
-	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 	"github.com/spf13/cobra"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/credentials"
 )
 
 var _ command.OptionsSet = (*TokenReadOptions)(nil)
@@ -121,7 +123,7 @@ func readFromCarabinerIdentity(ctx context.Context) (string, error) {
 	// Load with auto-renewal
 	token, _, renewed, err := credentials.LoadIdentityWithRenewal(ctx, serverURL)
 	if err != nil {
-		if err == credentials.ErrTokenExpired {
+		if errors.Is(err, credentials.ErrTokenExpired) {
 			return "", fmt.Errorf("identity token has expired, please run 'carabiner login' to authenticate again")
 		}
 		return "", fmt.Errorf("loading carabiner identity: %w", err)

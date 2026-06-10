@@ -9,8 +9,9 @@ import (
 	"fmt"
 
 	"github.com/carabiner-dev/command"
-	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 	"github.com/spf13/cobra"
+
+	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
 )
 
 const (
