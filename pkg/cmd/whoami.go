@@ -49,6 +49,7 @@ type TokenClaims struct {
 	ExpiresAt int64    `json:"exp,omitempty"`
 	IssuedAt  int64    `json:"iat,omitempty"`
 	Provider  string   `json:"provider,omitempty"`
+	Username  string   `json:"username,omitempty"`
 }
 
 func AddWhoami(parent *cobra.Command) {
@@ -139,6 +140,7 @@ Examples:
 			if claims.Subject != "" {
 				fmt.Printf("Subject:    %s\n", claims.Subject)
 			}
+			fmt.Printf("Username:   %s\n", claims.Username)
 			if claims.Email != "" {
 				fmt.Printf("Email:      %s\n", claims.Email)
 			}
