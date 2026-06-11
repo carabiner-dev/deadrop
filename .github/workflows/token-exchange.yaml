@@ -4,7 +4,15 @@
 name: token-exchange
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      server:
+        description: Deadrop server to exchange the token against
+        type: choice
+        default: https://auth.carabiner.dev
+        options:
+          - https://auth.carabiner.dev
+          - https://auth.dev.carabiner.dev
   pull_request:
     branches: [ "main" ]
   push:
@@ -33,4 +41,7 @@ jobs:
           cache: true
 
       - name: Log in exchanging the ambient actions token
-        run: go run ./cmd/deadrop login --server https://auth.carabiner.dev
+        # PR and push runs always test against prod; manual runs can choose
+        env:
+          DEADROP_SERVER: ${{ inputs.server || 'https://auth.carabiner.dev' }}
+        run: go run ./cmd/deadrop login --server "$DEADROP_SERVER"
