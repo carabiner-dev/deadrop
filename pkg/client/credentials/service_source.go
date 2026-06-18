@@ -96,8 +96,11 @@ type ServiceTokenSource struct {
 // from the identity source on each exchange. All other fields (Audience, Scope,
 // Resource, SubjectTokenType, RequestedTokenType) are forwarded as-is.
 //
-// The serverURL is the deadrop exchange server URL.
-// Use options to configure identity source, persistence, and refresh behavior.
+// The serverURL is the deadrop exchange server URL. By default the subject
+// identity is read from serverURL's own session (see ServerTokenSource), so it
+// matches the environment being exchanged at; override with
+// WithServiceIdentitySource. Use options to configure persistence and refresh
+// behavior.
 func NewServiceTokenSource(req *exchange.ExchangeRequest, serverURL string, opts ...ServiceTokenSourceOption) (*ServiceTokenSource, error) {
 	if req == nil {
 		return nil, errors.New("exchange request is required")
@@ -121,11 +124,12 @@ func NewServiceTokenSource(req *exchange.ExchangeRequest, serverURL string, opts
 	}
 
 	if s.source == nil {
-		defaultSource, err := DefaultTokenSource()
-		if err != nil {
-			return nil, fmt.Errorf("creating default identity source: %w", err)
-		}
-		s.source = defaultSource
+		// Bind the subject identity to serverURL's session rather than the
+		// global default session, so the identity we exchange always belongs to
+		// the same environment we're exchanging it at. (A non-default session —
+		// e.g. after switching CLI context — must not exchange the default
+		// session's identity at a different server.)
+		s.source = ServerTokenSource(serverURL)
 	}
 
 	return s, nil

@@ -181,6 +181,25 @@ func DefaultTokenSource() (TokenSource, error) {
 	), nil
 }
 
+// ServerTokenSource returns a TokenSource for the identity to exchange at
+// serverURL. It tries, in order:
+//  1. the CARABINER_CREDENTIALS environment variable
+//  2. the identity file for serverURL's session
+//
+// Unlike DefaultTokenSource, it binds the identity to a specific server's
+// session rather than the global default session, so the subject identity
+// always matches the exchange server — avoiding exchanging one environment's
+// identity at another environment's deadrop. When serverURL has no session,
+// only the environment variable is consulted (construction stays non-fatal;
+// a missing identity surfaces when Token is called).
+func ServerTokenSource(serverURL string) TokenSource {
+	sources := []TokenSource{DefaultEnvTokenSource()}
+	if path, err := GetSessionIdentityPath(serverURL); err == nil {
+		sources = append(sources, NewFileTokenSource(path))
+	}
+	return NewChainedTokenSource(sources...)
+}
+
 // ResolveExchangeServer returns the exchange server URL to use. If override
 // is non-empty it is returned directly. Otherwise the server URL from the
 // default session is used. If no session exists, DefaultExchangeServer is
