@@ -70,7 +70,7 @@ Examples:
   carabiner login
 
   # Login to a specific server
-  carabiner login --server https://auth.carabiner.dev
+  carabiner login --auth-server https://auth.carabiner.dev
 
   # Force new login (ignore cached token)
   carabiner login --force
@@ -99,7 +99,7 @@ Examples:
 
 			// For login, we need the server URL to be set
 			if cfg.ServerURL == "" {
-				return fmt.Errorf("server URL is required (set via --server flag or DEADROP_SERVER env var)")
+				return fmt.Errorf("server URL is required (set via --auth-server flag or DEADROP_SERVER env var)")
 			}
 
 			// Check for cached identity token for this server (unless --force)

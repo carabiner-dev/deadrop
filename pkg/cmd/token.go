@@ -60,7 +60,7 @@ Examples:
   carabiner token
 
   # Show token for a specific server
-  carabiner token --server https://auth.carabiner.dev
+  carabiner token --auth-server https://auth.carabiner.dev
 
   # Decode and display JWT claims
   carabiner token --decode

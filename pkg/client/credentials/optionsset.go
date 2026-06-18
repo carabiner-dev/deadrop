@@ -30,7 +30,7 @@ const DefaultLoginURL = "https://login.carabiner.dev"
 type ServerOptionsOption func(*ServerOptions)
 
 // WithPrefix sets the flag prefix for the options.
-// For example, WithPrefix("deadrop") results in flags like --deadrop-server.
+// For example, WithPrefix("deadrop") results in flags like --deadrop-auth-server.
 func WithPrefix(prefix string) ServerOptionsOption {
 	return func(o *ServerOptions) {
 		o.Prefix = prefix
@@ -53,7 +53,7 @@ func WithDisablePersistence() ServerOptionsOption {
 }
 
 // ServerOptions is an ServerOptionsSet for configuring deadrop credentials in CLI tools.
-// It provides the --server flag and methods to obtain TokenSource instances
+// It provides the --auth-server flag and methods to obtain TokenSource instances
 // for specific audiences.
 //
 // Example usage in a CLI tool:
@@ -85,7 +85,7 @@ type ServerOptions struct {
 	// Server is the deadrop exchange server URL.
 	Server string
 
-	// Prefix is an optional prefix for flag names (e.g., "deadrop" -> "--deadrop-server").
+	// Prefix is an optional prefix for flag names (e.g., "deadrop" -> "--deadrop-auth-server").
 	Prefix string
 
 	// Audience is the default audience for token exchange.
@@ -127,8 +127,8 @@ func (o *ServerOptions) Config() *command.OptionsSetConfig {
 		FlagPrefix: o.Prefix,
 		Flags: map[string]command.FlagConfig{
 			flagServer: {
-				Long: "server",
-				Help: "Deadrop exchange server URL",
+				Long: "auth-server",
+				Help: "Deadrop auth/exchange server URL",
 			},
 		},
 	}

@@ -52,7 +52,7 @@ Examples:
   carabiner logout
 
   # Logout from a specific server
-  carabiner logout --server https://auth.carabiner.dev
+  carabiner logout --auth-server https://auth.carabiner.dev
 
   # Clear all cached identities
   carabiner logout --all`,

@@ -70,7 +70,7 @@ Examples:
   carabiner whoami
 
   # Show identity for a specific server
-  carabiner whoami --server https://auth.carabiner.dev
+  carabiner whoami --auth-server https://auth.carabiner.dev
 
   # Output as JSON
   carabiner whoami --json`,

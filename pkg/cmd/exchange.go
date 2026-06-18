@@ -95,7 +95,7 @@ Examples:
   deadrop exchange --token /path/to/token.jwt --audience https://api.example.com
 
   # Use a custom exchange server
-  deadrop exchange --server https://auth.mycompany.com --audience https://api.example.com
+  deadrop exchange --auth-server https://auth.mycompany.com --audience https://api.example.com
 
   # Use caching (reuses token if still valid)
   deadrop exchange --audience https://api.example.com --cache`,

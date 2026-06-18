@@ -109,14 +109,14 @@ func TestServerOptions_Config(t *testing.T) {
 	})
 
 	t.Run("with prefix", func(t *testing.T) {
-		opts := NewServerOptions(WithPrefix("auth"))
+		opts := NewServerOptions(WithPrefix("deadrop"))
 		cfg := opts.Config()
 
 		require.NotNil(t, cfg)
-		assert.Equal(t, "auth", cfg.FlagPrefix)
+		assert.Equal(t, "deadrop", cfg.FlagPrefix)
 
 		// LongFlag should return prefixed flag name
-		assert.Equal(t, "auth-server", cfg.LongFlag("server"))
+		assert.Equal(t, "deadrop-auth-server", cfg.LongFlag("server"))
 	})
 }
 
@@ -127,19 +127,19 @@ func TestServerOptions_AddFlags(t *testing.T) {
 
 		opts.AddFlags(cmd)
 
-		serverFlag := cmd.PersistentFlags().Lookup("server")
+		serverFlag := cmd.PersistentFlags().Lookup("auth-server")
 		require.NotNil(t, serverFlag)
 		assert.Equal(t, DefaultServer, serverFlag.DefValue)
 	})
 
 	t.Run("with prefix", func(t *testing.T) {
-		opts := NewServerOptions(WithPrefix("auth"))
+		opts := NewServerOptions(WithPrefix("deadrop"))
 		cmd := &cobra.Command{}
 
 		opts.AddFlags(cmd)
 
 		// With prefix, flags should be prefixed
-		serverFlag := cmd.PersistentFlags().Lookup("auth-server")
+		serverFlag := cmd.PersistentFlags().Lookup("deadrop-auth-server")
 		require.NotNil(t, serverFlag)
 		assert.Equal(t, DefaultServer, serverFlag.DefValue)
 	})
