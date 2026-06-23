@@ -44,4 +44,4 @@ jobs:
         # PR and push runs always test against prod; manual runs can choose
         env:
           DEADROP_SERVER: ${{ inputs.server || 'https://auth.carabiner.dev' }}
-        run: go run ./cmd/deadrop login --server "$DEADROP_SERVER"
+        run: go run ./cmd/deadrop login --auth-server "$DEADROP_SERVER"
