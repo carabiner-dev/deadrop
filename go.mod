@@ -6,7 +6,7 @@ require (
 	github.com/adrg/xdg v0.5.3
 	github.com/carabiner-dev/command v0.3.1
 	github.com/carabiner-dev/signer v0.5.2
-	github.com/chainguard-dev/clog v1.8.0
+	github.com/chainguard-dev/clog v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/sigstore/sigstore v1.10.8
 	github.com/spf13/cobra v1.10.2
