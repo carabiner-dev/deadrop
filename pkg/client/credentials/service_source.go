@@ -299,6 +299,13 @@ func (s *ServiceTokenSource) waitForRefresh(ctx context.Context) (string, error)
 func (s *ServiceTokenSource) doExchange(ctx context.Context) (token string, issuedAt, expiresAt time.Time, err error) {
 	identityToken, err := s.source.Token(ctx)
 	if err != nil {
+		// No usable identity means the caller isn't logged in (or their session
+		// is gone), so flag it as ErrAuthRequired for callers that prompt a
+		// login. A cancelled/expired context is a different failure, so leave
+		// it unclassified.
+		if ctx.Err() == nil {
+			return "", time.Time{}, time.Time{}, fmt.Errorf("getting identity token: %w: %w", exchange.ErrAuthRequired, err)
+		}
 		return "", time.Time{}, time.Time{}, fmt.Errorf("getting identity token: %w", err)
 	}
 

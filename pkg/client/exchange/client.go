@@ -169,8 +169,21 @@ func (c *Client) handleErrorResponse(statusCode int, body []byte) error {
 	// Try to parse as OAuth error
 	var errorResp ErrorResponse
 	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error != "" {
-		return fmt.Errorf("token exchange failed (HTTP %d): %s - %s",
+		detail := fmt.Errorf("token exchange failed (HTTP %d): %s - %s",
 			statusCode, errorResp.Error, errorResp.ErrorDescription)
+		// When the server rejects the subject identity itself, the caller must
+		// re-authenticate; flag it as such so it can be detected with errors.Is.
+		if isAuthErrorCode(errorResp.Error) {
+			return fmt.Errorf("%w: %w", ErrAuthRequired, detail)
+		}
+		return detail
+	}
+
+	// An unauthorized response with no parseable OAuth body is still an auth
+	// failure the user resolves by logging in again.
+	if statusCode == http.StatusUnauthorized {
+		return fmt.Errorf("%w: token exchange failed (HTTP %d): %s",
+			ErrAuthRequired, statusCode, string(body))
 	}
 
 	// Fallback to generic error
