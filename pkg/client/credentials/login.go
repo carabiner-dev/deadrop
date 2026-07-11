@@ -5,11 +5,12 @@ package credentials
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
+	loginclient "github.com/carabiner-dev/deadrop/pkg/client/login"
 )
 
 // BrowserLoginTimeout is the maximum time BrowserLogin waits for the user
@@ -109,16 +111,28 @@ func HeadlessLogin(ctx context.Context, serverURL, idpToken string) (string, err
 }
 
 // BrowserLogin runs the interactive browser flow against the Carabiner login
-// service at loginURL. It starts a callback server on a random loopback port,
-// sends the user's browser to the login service and waits up to
-// BrowserLoginTimeout for the service to redirect back with the Carabiner
-// identity token.
+// service at loginURL. It starts a callback server on a random loopback port
+// and drives the OAuth authorization-code flow with PKCE: it sends the user's
+// browser to the login service, receives a one-time code on the loopback
+// callback, and redeems it over a back-channel for the Carabiner identity
+// token — so the token never appears in a browser-visible URL.
 //
 // Progress messages are written to stderr; the token is returned, not
 // persisted.
 func BrowserLogin(ctx context.Context, loginURL string) (string, error) {
 	if loginURL == "" {
 		loginURL = DefaultLoginURL
+	}
+
+	// Generate PKCE and a CSRF state. The verifier stays in this process and is
+	// presented only at redemption, so a leaked code is useless to anyone else.
+	pkce, err := loginclient.GeneratePKCE()
+	if err != nil {
+		return "", fmt.Errorf("generating PKCE: %w", err)
+	}
+	state, err := randomState()
+	if err != nil {
+		return "", err
 	}
 
 	// Start local callback server
@@ -147,11 +161,31 @@ func BrowserLogin(ctx context.Context, loginURL string) (string, error) {
 				return
 			}
 
-			// Accept GET with token in query params (browser redirect from login service)
-			token := r.URL.Query().Get("token")
-			if token == "" {
-				http.Error(w, "No token in request", http.StatusBadRequest)
-				errCh <- errors.New("no token in callback")
+			q := r.URL.Query()
+			if e := q.Get("error"); e != "" {
+				http.Error(w, "Authentication error: "+e, http.StatusBadRequest)
+				errCh <- fmt.Errorf("login returned error: %s", e)
+				return
+			}
+
+			// Authorization-code flow: receive a one-time code (+ state), verify
+			// state, then redeem the code over the back-channel for the token.
+			code := q.Get("code")
+			if code == "" {
+				http.Error(w, "No authorization code in request", http.StatusBadRequest)
+				errCh <- errors.New("no authorization code in callback")
+				return
+			}
+			if q.Get("state") != state {
+				http.Error(w, "State mismatch", http.StatusBadRequest)
+				errCh <- errors.New("state mismatch in callback")
+				return
+			}
+
+			token, err := loginclient.NewClient(loginURL).Redeem(ctx, code, pkce.Verifier)
+			if err != nil {
+				http.Error(w, "Failed to complete login", http.StatusBadGateway)
+				errCh <- fmt.Errorf("redeeming authorization code: %w", err)
 				return
 			}
 
@@ -160,7 +194,7 @@ func BrowserLogin(ctx context.Context, loginURL string) (string, error) {
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, loginSuccessPage) //nolint:errcheck // best-effort response to the browser
 
-			tokenCh <- token
+			tokenCh <- token.AccessToken
 		}),
 	}
 
@@ -170,8 +204,12 @@ func BrowserLogin(ctx context.Context, loginURL string) (string, error) {
 		}
 	}()
 
-	// Build login URL with our callback address
-	browserURL, err := buildLoginURL(loginURL, callbackURL)
+	// Build the authorization-code login URL with our callback address.
+	browserURL, err := loginclient.AuthCodeURL(loginURL, loginclient.AuthCodeParams{
+		CallbackURL: callbackURL,
+		State:       state,
+		Challenge:   pkce.Challenge,
+	})
 	if err != nil {
 		return "", fmt.Errorf("building login URL: %w", err)
 	}
@@ -205,21 +243,14 @@ func BrowserLogin(ctx context.Context, loginURL string) (string, error) {
 	}
 }
 
-// buildLoginURL constructs the login service URL with callback parameter.
-// This sends the user to the provider selection page where they can choose
-// their preferred authentication method.
-func buildLoginURL(baseURL, callbackURL string) (string, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return "", err
+// randomState returns a random URL-safe state value used to bind the callback
+// to this login attempt (CSRF protection).
+func randomState() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generating state: %w", err)
 	}
-
-	// Add callback_url parameter - user will select provider on the login page
-	q := u.Query()
-	q.Set("callback_url", callbackURL)
-	u.RawQuery = q.Encode()
-
-	return u.String(), nil
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // openBrowser opens the default browser to the specified URL.
