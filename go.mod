@@ -1,6 +1,6 @@
 module github.com/carabiner-dev/deadrop
 
-go 1.25.11
+go 1.25.12
 
 require (
 	github.com/adrg/xdg v0.5.3
