@@ -25,6 +25,15 @@ message ExchangeRequest {
 
   // Resource URIs - multiple values per RFC 8693
   repeated string resource = 6;
+
+  // Actor token (RFC 8693 section 2.1): the credential of the party acting
+  // on behalf of the subject. Optional; exchanges pinned to a specific
+  // caller require it (e.g. a service exchanging a GitHub App installation
+  // token it holds must present its own identity alongside it).
+  string actor_token = 7;
+
+  // Type of actor token (e.g., "urn:ietf:params:oauth:token-type:jwt")
+  string actor_token_type = 8;
 }
 
 // ExchangeResponse represents the response from token exchange

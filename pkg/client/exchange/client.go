@@ -53,6 +53,15 @@ func (c *Client) ExchangeToken(ctx context.Context, req *ExchangeRequest) (*Exch
 		formData.Set("scope", strings.Join(req.Scope, " "))
 	}
 
+	// Actor credential (RFC 8693 section 2.1): the party acting on behalf of
+	// the subject. Sent only when set; the type defaults server-side to JWT.
+	if req.ActorToken != "" {
+		formData.Set("actor_token", req.ActorToken)
+		if req.ActorTokenType != "" {
+			formData.Set("actor_token_type", req.ActorTokenType)
+		}
+	}
+
 	// Add resource - multiple parameters per RFC 8693
 	for _, res := range req.Resource {
 		formData.Add("resource", res)
