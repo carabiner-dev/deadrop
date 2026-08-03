@@ -37,9 +37,16 @@ type ExchangeRequest struct {
 	// Optional scopes
 	Scope []string `protobuf:"bytes,5,rep,name=scope,proto3" json:"scope,omitempty"`
 	// Resource URIs - multiple values per RFC 8693
-	Resource      []string `protobuf:"bytes,6,rep,name=resource,proto3" json:"resource,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Resource []string `protobuf:"bytes,6,rep,name=resource,proto3" json:"resource,omitempty"`
+	// Actor token (RFC 8693 section 2.1): the credential of the party acting
+	// on behalf of the subject. Optional; exchanges pinned to a specific
+	// caller require it (e.g. a service exchanging a GitHub App installation
+	// token it holds must present its own identity alongside it).
+	ActorToken string `protobuf:"bytes,7,opt,name=actor_token,json=actorToken,proto3" json:"actor_token,omitempty"`
+	// Type of actor token (e.g., "urn:ietf:params:oauth:token-type:jwt")
+	ActorTokenType string `protobuf:"bytes,8,opt,name=actor_token_type,json=actorTokenType,proto3" json:"actor_token_type,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ExchangeRequest) Reset() {
@@ -112,6 +119,20 @@ func (x *ExchangeRequest) GetResource() []string {
 		return x.Resource
 	}
 	return nil
+}
+
+func (x *ExchangeRequest) GetActorToken() string {
+	if x != nil {
+		return x.ActorToken
+	}
+	return ""
+}
+
+func (x *ExchangeRequest) GetActorTokenType() string {
+	if x != nil {
+		return x.ActorTokenType
+	}
+	return ""
 }
 
 // ExchangeResponse represents the response from token exchange
@@ -246,14 +267,17 @@ var File_carabiner_deadrop_v1_exchange_proto protoreflect.FileDescriptor
 
 const file_carabiner_deadrop_v1_exchange_proto_rawDesc = "" +
 	"\n" +
-	"#carabiner/deadrop/v1/exchange.proto\x12\x14carabiner.deadrop.v1\"\xe4\x01\n" +
+	"#carabiner/deadrop/v1/exchange.proto\x12\x14carabiner.deadrop.v1\"\xaf\x02\n" +
 	"\x0fExchangeRequest\x12#\n" +
 	"\rsubject_token\x18\x01 \x01(\tR\fsubjectToken\x12,\n" +
 	"\x12subject_token_type\x18\x02 \x01(\tR\x10subjectTokenType\x120\n" +
 	"\x14requested_token_type\x18\x03 \x01(\tR\x12requestedTokenType\x12\x1a\n" +
 	"\baudience\x18\x04 \x03(\tR\baudience\x12\x14\n" +
 	"\x05scope\x18\x05 \x03(\tR\x05scope\x12\x1a\n" +
-	"\bresource\x18\x06 \x03(\tR\bresource\"\x9f\x01\n" +
+	"\bresource\x18\x06 \x03(\tR\bresource\x12\x1f\n" +
+	"\vactor_token\x18\a \x01(\tR\n" +
+	"actorToken\x12(\n" +
+	"\x10actor_token_type\x18\b \x01(\tR\x0eactorTokenType\"\x9f\x01\n" +
 	"\x10ExchangeResponse\x12!\n" +
 	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\x12*\n" +
 	"\x11issued_token_type\x18\x02 \x01(\tR\x0fissuedTokenType\x12\x1d\n" +
