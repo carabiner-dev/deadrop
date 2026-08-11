@@ -5,7 +5,7 @@ go 1.25.12
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/carabiner-dev/command v0.3.1
-	github.com/carabiner-dev/signer v0.5.2
+	github.com/carabiner-dev/signer v0.5.4
 	github.com/chainguard-dev/clog v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/sigstore/sigstore v1.10.9
@@ -18,7 +18,7 @@ require (
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
-	github.com/cloudflare/circl v1.6.2 // indirect
+	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/coreos/go-oidc/v3 v3.20.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
