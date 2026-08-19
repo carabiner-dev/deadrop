@@ -43,8 +43,9 @@ func disableAmbientEnv(t *testing.T) {
 }
 
 // newExchangeServerForLogin returns an httptest server implementing the
-// /token endpoint, capturing the subject token it receives.
-func newExchangeServerForLogin(t *testing.T, carabinerToken string, subjectToken *string) *httptest.Server {
+// /token endpoint, capturing the subject token and requested audiences it
+// receives.
+func newExchangeServerForLogin(t *testing.T, carabinerToken string, subjectToken *string, audience *[]string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/token" {
@@ -56,6 +57,9 @@ func newExchangeServerForLogin(t *testing.T, carabinerToken string, subjectToken
 			return
 		}
 		*subjectToken = r.FormValue("subject_token")
+		if audience != nil {
+			*audience = r.Form["audience"]
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(`{"access_token": "` + carabinerToken + `", "token_type": "Bearer", "expires_in": 3600}`)); err != nil {
@@ -69,8 +73,11 @@ func TestHeadlessLogin(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("exchanges idp token", func(t *testing.T) {
-		var gotSubject string
-		server := newExchangeServerForLogin(t, carabinerToken, &gotSubject)
+		var (
+			gotSubject  string
+			gotAudience []string
+		)
+		server := newExchangeServerForLogin(t, carabinerToken, &gotSubject, &gotAudience)
 		defer server.Close()
 
 		token, err := HeadlessLogin(ctx, server.URL, "idp-token")
@@ -82,6 +89,11 @@ func TestHeadlessLogin(t *testing.T) {
 		}
 		if gotSubject != "idp-token" {
 			t.Errorf("subject_token = %q, want %q", gotSubject, "idp-token")
+		}
+		// The identity must be minted for the API audience (what the server's
+		// identity exchangers accept), not for the exchange server itself.
+		if len(gotAudience) != 1 || gotAudience[0] != DefaultIdentityAudience {
+			t.Errorf("audience = %v, want [%s]", gotAudience, DefaultIdentityAudience)
 		}
 	})
 
@@ -123,7 +135,7 @@ func TestLogin(t *testing.T) {
 		disableAmbientEnv(t)
 
 		var gotSubject string
-		server := newExchangeServerForLogin(t, carabinerToken, &gotSubject)
+		server := newExchangeServerForLogin(t, carabinerToken, &gotSubject, nil)
 		defer server.Close()
 
 		provider := &fakeSTSProvider{token: "ambient-idp-token"} //nolint:gosec // test value, not a credential

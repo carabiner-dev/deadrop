@@ -91,6 +91,12 @@ func Login(ctx context.Context, serverURL, loginURL string) (string, error) {
 // HeadlessLogin exchanges an identity provider token (for example a GitHub
 // Actions OIDC token) for a Carabiner identity token at the deadrop server.
 // The IdP token must have been minted with the deadrop server as audience.
+//
+// The exchange requests DefaultIdentityAudience (the public API), the same
+// audience the login service requests for a browser login, so the headless
+// identity is interchangeable with an interactive one: the server's identity
+// exchangers only accept that audience, and it is what they re-exchange from
+// when the identity is later traded for service tokens.
 func HeadlessLogin(ctx context.Context, serverURL, idpToken string) (string, error) {
 	if serverURL == "" {
 		return "", errors.New("server URL is required")
@@ -101,7 +107,7 @@ func HeadlessLogin(ctx context.Context, serverURL, idpToken string) (string, err
 
 	resp, err := exchange.NewClient(serverURL).ExchangeToken(ctx, &exchange.ExchangeRequest{
 		SubjectToken: idpToken,
-		Audience:     []string{serverURL},
+		Audience:     []string{DefaultIdentityAudience},
 	})
 	if err != nil {
 		return "", fmt.Errorf("exchanging identity provider token: %w", err)
