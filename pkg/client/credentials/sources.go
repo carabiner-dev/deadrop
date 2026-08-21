@@ -25,6 +25,14 @@ const (
 
 	// DefaultExchangeServer is the default deadrop exchange server URL.
 	DefaultExchangeServer = "https://auth.carabiner.dev"
+
+	// DefaultIdentityAudience is the audience of a Carabiner identity token:
+	// the public API. It is what the login service requests when it mints the
+	// identity token for a browser login, and what the deadrop server's
+	// identity exchangers (the GitHub Actions one included) accept and
+	// re-exchange from. It is the same in every environment; only the exchange
+	// server differs.
+	DefaultIdentityAudience = "https://api.carabiner.dev"
 )
 
 // StaticTokenSource returns a fixed token. Useful for testing.
