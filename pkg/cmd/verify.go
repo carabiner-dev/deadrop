@@ -441,15 +441,21 @@ func jwkToECDSAPublicKey(jwk *JWK) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to decode Y coordinate: %w", err)
 	}
 
-	// Convert bytes to big integers
-	x := new(big.Int).SetBytes(xBytes)
-	y := new(big.Int).SetBytes(yBytes)
+	// Build the uncompressed point encoding (0x04 || X || Y), left-padding
+	// each coordinate to the curve's field size, and let the standard
+	// library validate that the point is on the curve.
+	fieldSize := (curve.Params().BitSize + 7) / 8
+	if len(xBytes) > fieldSize || len(yBytes) > fieldSize {
+		return nil, fmt.Errorf("coordinate length exceeds field size for curve %s", jwk.Crv)
+	}
+	point := make([]byte, 1+2*fieldSize)
+	point[0] = 0x04
+	copy(point[1+fieldSize-len(xBytes):], xBytes)
+	copy(point[1+2*fieldSize-len(yBytes):], yBytes)
 
-	// Create the ECDSA public key
-	publicKey := &ecdsa.PublicKey{
-		Curve: curve,
-		X:     x,
-		Y:     y,
+	publicKey, err := ecdsa.ParseUncompressedPublicKey(curve, point)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse EC public key: %w", err)
 	}
 
 	return publicKey, nil
