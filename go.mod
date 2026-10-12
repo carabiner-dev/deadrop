@@ -1,6 +1,6 @@
 module github.com/carabiner-dev/deadrop
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/adrg/xdg v0.5.3
@@ -8,7 +8,7 @@ require (
 	github.com/carabiner-dev/signer v0.6.2
 	github.com/chainguard-dev/clog v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/sigstore/sigstore v1.10.9
+	github.com/sigstore/sigstore v1.11.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/term v0.46.0
@@ -26,7 +26,7 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/policylabs/signer v0.6.3 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
+	github.com/secure-systems-lab/go-securesystemslib v0.11.1 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
