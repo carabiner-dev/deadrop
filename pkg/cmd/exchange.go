@@ -163,13 +163,13 @@ Examples:
 					return fmt.Errorf("token exchange failed: %w", err)
 				}
 
-				accessToken = resp.AccessToken
-				expiresIn = time.Duration(resp.ExpiresIn) * time.Second
+				accessToken = resp.GetAccessToken()
+				expiresIn = time.Duration(resp.GetExpiresIn()) * time.Second
 
 				// Print metadata to stderr
 				fmt.Fprintln(os.Stderr)
-				fmt.Fprintf(os.Stderr, "Token Type:  %s\n", resp.TokenType)
-				fmt.Fprintf(os.Stderr, "Issued Type: %s\n", resp.IssuedTokenType)
+				fmt.Fprintf(os.Stderr, "Token Type:  %s\n", resp.GetTokenType())
+				fmt.Fprintf(os.Stderr, "Issued Type: %s\n", resp.GetIssuedTokenType())
 				fmt.Fprintf(os.Stderr, "Expires In:  %s\n", expiresIn)
 				fmt.Fprintln(os.Stderr)
 			}

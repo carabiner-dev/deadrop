@@ -386,9 +386,9 @@ func renewToken(ctx context.Context, serverURL, token string) (string, time.Time
 	}
 
 	// Calculate expiry from response
-	exp := time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
+	exp := time.Now().Add(time.Duration(resp.GetExpiresIn()) * time.Second)
 
-	return resp.AccessToken, exp, nil
+	return resp.GetAccessToken(), exp, nil
 }
 
 // LoadDefaultIdentity loads the identity token from the default session.

@@ -39,16 +39,16 @@ type CachedToken struct {
 // Scope, and Resource fields are hashed.
 func HashExchangeRequest(req *exchange.ExchangeRequest) string {
 	// Sort all arrays for deterministic ordering
-	audience := make([]string, len(req.Audience))
-	copy(audience, req.Audience)
+	audience := make([]string, len(req.GetAudience()))
+	copy(audience, req.GetAudience())
 	sort.Strings(audience)
 
-	scope := make([]string, len(req.Scope))
-	copy(scope, req.Scope)
+	scope := make([]string, len(req.GetScope()))
+	copy(scope, req.GetScope())
 	sort.Strings(scope)
 
-	resource := make([]string, len(req.Resource))
-	copy(resource, req.Resource)
+	resource := make([]string, len(req.GetResource()))
+	copy(resource, req.GetResource())
 	sort.Strings(resource)
 
 	// Build a canonical string representation
@@ -220,9 +220,9 @@ func exchangeAndCache(ctx context.Context, serverURL string, req *exchange.Excha
 	// Perform the exchange with a fresh request to avoid mutating the caller's pointer
 	exchangeReq := &exchange.ExchangeRequest{
 		SubjectToken: identityToken,
-		Audience:     req.Audience,
-		Scope:        req.Scope,
-		Resource:     req.Resource,
+		Audience:     req.GetAudience(),
+		Scope:        req.GetScope(),
+		Resource:     req.GetResource(),
 	}
 	resp, err := exchange.NewClient(serverURL).ExchangeToken(ctx, exchangeReq)
 	if err != nil {
@@ -230,13 +230,13 @@ func exchangeAndCache(ctx context.Context, serverURL string, req *exchange.Excha
 	}
 
 	// Calculate expiry
-	expiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
+	expiresAt = time.Now().Add(time.Duration(resp.GetExpiresIn()) * time.Second)
 
 	// Cache the token. Don't fail on error - we still have a valid token,
 	// it just won't be cached for next time.
-	_ = SaveExchangedToken(serverURL, req, resp.AccessToken, expiresAt) //nolint:errcheck
+	_ = SaveExchangedToken(serverURL, req, resp.GetAccessToken(), expiresAt) //nolint:errcheck
 
-	return resp.AccessToken, expiresAt, true, nil
+	return resp.GetAccessToken(), expiresAt, true, nil
 }
 
 // DeleteExchangedToken removes a specific cached token.

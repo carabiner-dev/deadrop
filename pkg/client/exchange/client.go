@@ -39,31 +39,31 @@ func (c *Client) ExchangeToken(ctx context.Context, req *ExchangeRequest) (*Exch
 	// Build form data
 	formData := url.Values{}
 	formData.Set("grant_type", GrantTypeTokenExchange)
-	formData.Set("subject_token", req.SubjectToken)
-	formData.Set("subject_token_type", req.SubjectTokenType)
-	formData.Set("requested_token_type", req.RequestedTokenType)
+	formData.Set("subject_token", req.GetSubjectToken())
+	formData.Set("subject_token_type", req.GetSubjectTokenType())
+	formData.Set("requested_token_type", req.GetRequestedTokenType())
 
 	// Add audience - multiple parameters per RFC 8693
-	for _, aud := range req.Audience {
+	for _, aud := range req.GetAudience() {
 		formData.Add("audience", aud)
 	}
 
 	// Add scope - space-delimited string per RFC 8693
-	if len(req.Scope) > 0 {
-		formData.Set("scope", strings.Join(req.Scope, " "))
+	if len(req.GetScope()) > 0 {
+		formData.Set("scope", strings.Join(req.GetScope(), " "))
 	}
 
 	// Actor credential (RFC 8693 section 2.1): the party acting on behalf of
 	// the subject. Sent only when set; the type defaults server-side to JWT.
-	if req.ActorToken != "" {
-		formData.Set("actor_token", req.ActorToken)
-		if req.ActorTokenType != "" {
-			formData.Set("actor_token_type", req.ActorTokenType)
+	if req.GetActorToken() != "" {
+		formData.Set("actor_token", req.GetActorToken())
+		if req.GetActorTokenType() != "" {
+			formData.Set("actor_token_type", req.GetActorTokenType())
 		}
 	}
 
 	// Add resource - multiple parameters per RFC 8693
-	for _, res := range req.Resource {
+	for _, res := range req.GetResource() {
 		formData.Add("resource", res)
 	}
 
@@ -106,19 +106,19 @@ func (c *Client) ExchangeToken(ctx context.Context, req *ExchangeRequest) (*Exch
 
 // validateRequest validates the exchange request
 func (c *Client) validateRequest(req *ExchangeRequest) error {
-	if req.SubjectToken == "" {
+	if req.GetSubjectToken() == "" {
 		return fmt.Errorf("subject_token is required")
 	}
 
-	if req.SubjectTokenType == "" {
+	if req.GetSubjectTokenType() == "" {
 		req.SubjectTokenType = TokenTypeJWT // Default
 	}
 
-	if req.RequestedTokenType == "" {
+	if req.GetRequestedTokenType() == "" {
 		req.RequestedTokenType = TokenTypeJWT // Default
 	}
 
-	if len(req.Audience) == 0 {
+	if len(req.GetAudience()) == 0 {
 		return fmt.Errorf("audience is required")
 	}
 
@@ -177,12 +177,12 @@ func (c *Client) RenewToken(ctx context.Context, token string) (*ExchangeRespons
 func (c *Client) handleErrorResponse(statusCode int, body []byte) error {
 	// Try to parse as OAuth error
 	var errorResp ErrorResponse
-	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error != "" {
+	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.GetError() != "" {
 		detail := fmt.Errorf("token exchange failed (HTTP %d): %s - %s",
-			statusCode, errorResp.Error, errorResp.ErrorDescription)
+			statusCode, errorResp.GetError(), errorResp.GetErrorDescription())
 		// When the server rejects the subject identity itself, the caller must
 		// re-authenticate; flag it as such so it can be detected with errors.Is.
-		if isAuthErrorCode(errorResp.Error) {
+		if isAuthErrorCode(errorResp.GetError()) {
 			return fmt.Errorf("%w: %w", ErrAuthRequired, detail)
 		}
 		return detail
@@ -203,15 +203,15 @@ func (c *Client) handleErrorResponse(statusCode int, body []byte) error {
 func (c *Client) handleRenewErrorResponse(statusCode int, body []byte) error {
 	// Try to parse as OAuth error
 	var errorResp ErrorResponse
-	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.Error != "" {
+	if err := json.Unmarshal(body, &errorResp); err == nil && errorResp.GetError() != "" {
 		// Check for token_expired error which means the token is too old to renew
-		if errorResp.Error == "token_expired" {
+		if errorResp.GetError() == "token_expired" {
 			return &TokenExpiredError{
-				Message: errorResp.ErrorDescription,
+				Message: errorResp.GetErrorDescription(),
 			}
 		}
 		return fmt.Errorf("token renewal failed (HTTP %d): %s - %s",
-			statusCode, errorResp.Error, errorResp.ErrorDescription)
+			statusCode, errorResp.GetError(), errorResp.GetErrorDescription())
 	}
 
 	// Fallback to generic error

@@ -113,7 +113,7 @@ func HeadlessLogin(ctx context.Context, serverURL, idpToken string) (string, err
 		return "", fmt.Errorf("exchanging identity provider token: %w", err)
 	}
 
-	return resp.AccessToken, nil
+	return resp.GetAccessToken(), nil
 }
 
 // BrowserLogin runs the interactive browser flow against the Carabiner login

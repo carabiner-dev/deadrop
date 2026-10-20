@@ -105,7 +105,7 @@ func NewServiceTokenSource(req *exchange.ExchangeRequest, serverURL string, opts
 	if req == nil {
 		return nil, errors.New("exchange request is required")
 	}
-	if len(req.Audience) == 0 {
+	if len(req.GetAudience()) == 0 {
 		return nil, errors.New("at least one audience is required in the exchange request")
 	}
 	if serverURL == "" {
@@ -312,14 +312,14 @@ func (s *ServiceTokenSource) doExchange(ctx context.Context) (token string, issu
 	// Build a fresh request to avoid mutating the shared s.request pointer.
 	req := &exchange.ExchangeRequest{
 		SubjectToken: identityToken,
-		Audience:     s.request.Audience,
-		Scope:        s.request.Scope,
-		Resource:     s.request.Resource,
+		Audience:     s.request.GetAudience(),
+		Scope:        s.request.GetScope(),
+		Resource:     s.request.GetResource(),
 	}
 
 	// Debug log to track actual exchange requests
 	clog.FromContext(ctx).Debug("Sending token exchange request",
-		"server", s.serverURL, "audience", req.Audience, "resources", req.Resource)
+		"server", s.serverURL, "audience", req.GetAudience(), "resources", req.GetResource())
 
 	resp, err := s.client.ExchangeToken(ctx, req)
 	if err != nil {
@@ -327,11 +327,11 @@ func (s *ServiceTokenSource) doExchange(ctx context.Context) (token string, issu
 	}
 
 	now := time.Now()
-	expiresAt = now.Add(time.Duration(resp.ExpiresIn) * time.Second)
+	expiresAt = now.Add(time.Duration(resp.GetExpiresIn()) * time.Second)
 
-	clog.FromContext(ctx).Debug("Token exchange successful", "expires_in_seconds", resp.ExpiresIn)
+	clog.FromContext(ctx).Debug("Token exchange successful", "expires_in_seconds", resp.GetExpiresIn())
 
-	return resp.AccessToken, now, expiresAt, nil
+	return resp.GetAccessToken(), now, expiresAt, nil
 }
 
 // extractTokenIssuedAt extracts the issued-at time from a JWT token's iat claim.

@@ -145,7 +145,7 @@ func (m *Manager) Register(ctx context.Context, id string, req *exchange.Exchang
 	if id == "" {
 		return errors.New("token id is required")
 	}
-	if len(req.Audience) == 0 {
+	if len(req.GetAudience()) == 0 {
 		return errors.New("at least one audience is required")
 	}
 
@@ -434,9 +434,9 @@ func (m *Manager) refreshToken(ctx context.Context, id string, mt *managedToken)
 
 	req := &exchange.ExchangeRequest{
 		SubjectToken: centralToken,
-		Audience:     request.Audience,
-		Scope:        request.Scope,
-		Resource:     request.Resource,
+		Audience:     request.GetAudience(),
+		Scope:        request.GetScope(),
+		Resource:     request.GetResource(),
 	}
 
 	var lastErr error
@@ -462,10 +462,10 @@ func (m *Manager) refreshToken(ctx context.Context, id string, mt *managedToken)
 		}
 
 		// Calculate expiry time
-		expiresAt := time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second)
+		expiresAt := time.Now().Add(time.Duration(resp.GetExpiresIn()) * time.Second)
 
 		mt.mu.Lock()
-		mt.token = resp.AccessToken
+		mt.token = resp.GetAccessToken()
 		mt.expiresAt = expiresAt
 		mt.lastError = nil
 		mt.mu.Unlock()
