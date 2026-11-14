@@ -4,6 +4,8 @@
 name: token-exchange
 
 on:
+  # Temporarily manual-only until the auth server has a tenant for this repository.
+  # Restore PR and push triggers once tenant ownership is configured.
   workflow_dispatch:
     inputs:
       server:
@@ -13,10 +15,6 @@ on:
         options:
           - https://auth.carabiner.dev
           - https://auth.dev.carabiner.dev
-  pull_request:
-    branches: [ "main" ]
-  push:
-    branches: [ "main" ]
 
 permissions: {}
 
@@ -41,7 +39,6 @@ jobs:
           cache: true
 
       - name: Log in exchanging the ambient actions token
-        # PR and push runs always test against prod; manual runs can choose
         env:
-          DEADROP_SERVER: ${{ inputs.server || 'https://auth.carabiner.dev' }}
+          DEADROP_SERVER: ${{ inputs.server }}
         run: go run ./cmd/deadrop login --auth-server "$DEADROP_SERVER"
