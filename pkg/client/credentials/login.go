@@ -17,8 +17,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/carabiner-dev/signer/sts"
 	"github.com/chainguard-dev/clog"
+	"github.com/policylabs/signer/sts"
 	"golang.org/x/term"
 
 	"github.com/carabiner-dev/deadrop/pkg/client/exchange"
@@ -33,7 +33,7 @@ const BrowserLoginTimeout = 5 * time.Minute
 // serverURL.
 //
 // It first probes the registered STS providers (sts.DefaultProviders from
-// carabiner-dev/signer) for ambient identity provider credentials, such as
+// policylabs/signer) for ambient identity provider credentials, such as
 // the GitHub Actions or GitLab CI OIDC tokens. The first available IdP token
 // is exchanged at the deadrop server for a Carabiner identity (headless
 // login).

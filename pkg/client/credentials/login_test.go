@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/carabiner-dev/signer/sts"
+	"github.com/policylabs/signer/sts"
 	"github.com/sigstore/sigstore/pkg/oauthflow"
 )
 
