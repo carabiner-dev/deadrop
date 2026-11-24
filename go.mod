@@ -7,7 +7,7 @@ require (
 	github.com/carabiner-dev/command v0.3.4
 	github.com/chainguard-dev/clog v1.8.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/policylabs/signer v0.6.7
+	github.com/policylabs/signer v0.6.8
 	github.com/sigstore/sigstore v1.11.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
